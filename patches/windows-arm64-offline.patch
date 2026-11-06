@@ -1,0 +1,335 @@
+diff --git a/packages/app/src/entry.tsx b/packages/app/src/entry.tsx
+index e9c0a43..3caa774 100644
+--- a/packages/app/src/entry.tsx
++++ b/packages/app/src/entry.tsx
+@@ -68,7 +68,7 @@ const notify: Platform["notify"] = async (title, description, href) => {
+ 
+   const notification = new Notification(title, {
+     body: description ?? "",
+-    icon: "https://opencode.ai/favicon-96x96-v3.png",
++    icon: new URL("/favicon-96x96-v3.png", location.origin).href,
+   })
+ 
+   notification.onclick = () => {
+diff --git a/packages/app/src/pages/layout/sidebar-items.tsx b/packages/app/src/pages/layout/sidebar-items.tsx
+index 194f75f..eed0ac7 100644
+--- a/packages/app/src/pages/layout/sidebar-items.tsx
++++ b/packages/app/src/pages/layout/sidebar-items.tsx
+@@ -33,7 +33,7 @@ export const ProjectIcon = (props: { project: LocalProject; class?: string; noti
+         <Avatar
+           fallback={name()}
+           src={
+-            props.project.id === OPENCODE_PROJECT_ID ? "https://opencode.ai/favicon.svg" : props.project.icon?.override
++            props.project.id === OPENCODE_PROJECT_ID ? "/favicon-v3.svg" : props.project.icon?.override
+           }
+           {...getAvatarColors(props.project.icon?.color)}
+           class="size-full rounded"
+diff --git a/packages/opencode/script/build.ts b/packages/opencode/script/build.ts
+index 19353b6..b63a935 100755
+--- a/packages/opencode/script/build.ts
++++ b/packages/opencode/script/build.ts
+@@ -103,6 +103,10 @@ const allTargets: {
+     os: "darwin",
+     arch: "x64",
+   },
++  {
++    os: "win32",
++    arch: "arm64",
++  },
+   {
+     os: "win32",
+     arch: "x64",
+@@ -135,7 +139,10 @@ const targets = singleFlag
+     })
+   : allTargets
+ 
+-await $`rm -rf dist`
++const distRoot = path.resolve(dir, "dist")
++if (distRoot !== path.join(dir, "dist")) throw new Error("Unexpected build output directory")
++if (fs.existsSync(distRoot) && fs.lstatSync(distRoot).isSymbolicLink()) throw new Error("Build output must not be a link")
++await fs.promises.rm(distRoot, { recursive: true, force: true })
+ 
+ const binaries: Record<string, string> = {}
+ if (!skipInstall) {
+@@ -189,7 +196,9 @@ for (const item of targets) {
+     },
+   })
+ 
+-  await $`rm -rf ./dist/${name}/bin/tui`
++  const tuiPath = path.resolve(distRoot, name, "bin/tui")
++  if (!tuiPath.startsWith(distRoot + path.sep)) throw new Error("Unexpected auxiliary output directory")
++  await fs.promises.rm(tuiPath, { recursive: true, force: true })
+   await Bun.file(`dist/${name}/package.json`).write(
+     JSON.stringify(
+       {
+diff --git a/packages/opencode/src/bun/index.ts b/packages/opencode/src/bun/index.ts
+index 7bd1e6a..ab2a29e 100644
+--- a/packages/opencode/src/bun/index.ts
++++ b/packages/opencode/src/bun/index.ts
+@@ -66,7 +66,7 @@ export namespace BunProc {
+           return offlinePath
+         }
+       }
+-      log.warn("offline mode enabled but package not found in offline deps", { pkg })
++      throw new Error(`Offline dependency ${pkg} is missing from the local bundle; no package download was attempted.`)
+     }
+ 
+     // Use lock to ensure only one install at a time
+diff --git a/packages/opencode/src/cli/cmd/tui/routes/session/index.tsx b/packages/opencode/src/cli/cmd/tui/routes/session/index.tsx
+index 6d418ee..3aee266 100644
+--- a/packages/opencode/src/cli/cmd/tui/routes/session/index.tsx
++++ b/packages/opencode/src/cli/cmd/tui/routes/session/index.tsx
+@@ -79,7 +79,8 @@ import { DialogExportOptions } from "../../ui/dialog-export-options"
+ import { formatTranscript } from "../../util/transcript"
+ import { UI } from "@/cli/ui.ts"
+ 
+-addDefaultParsers(parsers.parsers)
++// offline-fork: additional grammars/queries above use remote URLs; keep core rendering offline.
++if (!Flag.OPENCODE_OFFLINE_MODE) addDefaultParsers(parsers.parsers)
+ 
+ class CustomSpeedScroll implements ScrollAcceleration {
+   constructor(private speed: number) {}
+diff --git a/packages/opencode/src/cli/cmd/tui/worker.ts b/packages/opencode/src/cli/cmd/tui/worker.ts
+index bb5495c..625d163 100644
+--- a/packages/opencode/src/cli/cmd/tui/worker.ts
++++ b/packages/opencode/src/cli/cmd/tui/worker.ts
+@@ -1,3 +1,4 @@
++import "@/offline/network"
+ import { Installation } from "@/installation"
+ import { Server } from "@/server/server"
+ import { Log } from "@/util/log"
+diff --git a/packages/opencode/src/config/config.ts b/packages/opencode/src/config/config.ts
+index 761ce23..faa0ec5 100644
+--- a/packages/opencode/src/config/config.ts
++++ b/packages/opencode/src/config/config.ts
+@@ -34,6 +34,7 @@ import { PackageRegistry } from "@/bun/registry"
+ import { proxied } from "@/util/proxied"
+ import { iife } from "@/util/iife"
+ import { Control } from "@/control"
++import { Offline } from "@/offline"
+ 
+ export namespace Config {
+   const ModelId = z.string().meta({ $ref: "https://models.dev/model-schema.json#/$defs/Model" })
+@@ -80,7 +81,7 @@ export namespace Config {
+     // Managed config directory is enterprise-only and always overrides everything above.
+     let result: Info = {}
+     for (const [key, value] of Object.entries(auth)) {
+-      if (value.type === "wellknown") {
++      if (value.type === "wellknown" && !Offline.isEnabled()) {
+         process.env[value.key] = value.token
+         log.debug("fetching remote config", { url: `${key}/.well-known/opencode` })
+         const response = await fetch(`${key}/.well-known/opencode`)
+@@ -171,7 +172,9 @@ export namespace Config {
+         }
+       }
+ 
+-      deps.push(
++      // offline-fork: stdio MCP needs no config-directory npm install.
++      // Required provider/plugin packages must already be bundled and fail explicitly if absent.
++      if (!Offline.isEnabled()) deps.push(
+         iife(async () => {
+           const shouldInstall = await needsInstall(dir)
+           if (shouldInstall) await installDependencies(dir)
+@@ -266,6 +269,7 @@ export namespace Config {
+   }
+ 
+   export async function installDependencies(dir: string) {
++    if (Offline.isEnabled()) throw new Error("Offline mode does not install config dependencies. Preinstall required local packages before starting.")
+     const pkg = path.join(dir, "package.json")
+     const targetVersion = Installation.isLocal() ? "*" : Installation.VERSION
+ 
+diff --git a/packages/opencode/src/file/ripgrep.ts b/packages/opencode/src/file/ripgrep.ts
+index 7ec32a8..3828377 100644
+--- a/packages/opencode/src/file/ripgrep.ts
++++ b/packages/opencode/src/file/ripgrep.ts
+@@ -144,7 +144,7 @@ export namespace Ripgrep {
+           return { filepath: offlinePath }
+         }
+       }
+-      log.warn("offline mode enabled but ripgrep not found in offline deps")
++      throw new Error("Offline ripgrep is missing. Install the bundled local rg binary before starting; no download was attempted.")
+     }
+ 
+     const filepath = path.join(Global.Path.bin, "rg" + (process.platform === "win32" ? ".exe" : ""))
+diff --git a/packages/opencode/src/index.ts b/packages/opencode/src/index.ts
+index 9af7927..e8f5b2c 100644
+--- a/packages/opencode/src/index.ts
++++ b/packages/opencode/src/index.ts
+@@ -1,3 +1,4 @@
++import "./offline/network"
+ import yargs from "yargs"
+ import { hideBin } from "yargs/helpers"
+ import { RunCommand } from "./cli/cmd/run"
+diff --git a/packages/opencode/src/offline/index.ts b/packages/opencode/src/offline/index.ts
+index 195d48d..5e1e84c 100644
+--- a/packages/opencode/src/offline/index.ts
++++ b/packages/opencode/src/offline/index.ts
+@@ -3,6 +3,22 @@ import { Flag } from "../flag/flag"
+ import { Filesystem } from "../util/filesystem"
+ 
+ export namespace Offline {
++  // Browser requests use a separate network stack from the CLI fetch guard.
++  export const webCSP = [
++    "default-src 'self'",
++    "script-src 'self' 'wasm-unsafe-eval'",
++    "style-src 'self' 'unsafe-inline'",
++    "connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:*",
++    "img-src 'self' data: blob:",
++    "font-src 'self' data:",
++    "media-src 'self' data: blob:",
++    "worker-src 'self' blob:",
++    "object-src 'none'",
++    "base-uri 'self'",
++    "form-action 'self'",
++    "frame-ancestors 'self'",
++  ].join("; ")
++
+   export function isEnabled(): boolean {
+     return Flag.OPENCODE_OFFLINE_MODE
+   }
+@@ -38,8 +54,12 @@ export namespace Offline {
+   export async function tryServeStaticFile(reqPath: string): Promise<{ body: ReturnType<typeof Bun.file>; mime: string } | undefined> {
+     const appDir = resolveAppDist()
+     if (!appDir) return undefined
+-    const filePath = reqPath === "/" ? "/index.html" : reqPath
+-    const file = Bun.file(path.join(appDir, filePath))
++    const filePath = path.resolve(appDir, "." + (reqPath === "/" ? "/index.html" : reqPath))
++    const relative = path.relative(appDir, filePath)
++    if (relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative)) {
++      throw new Error("Offline web asset path leaves the bundled app directory.")
++    }
++    const file = Bun.file(filePath)
+     if (await file.exists()) return { body: file, mime: Filesystem.mimeType(filePath) }
+     // SPA fallback: serve index.html for client-side routes
+     const index = Bun.file(path.join(appDir, "index.html"))
+diff --git a/packages/opencode/src/offline/network.ts b/packages/opencode/src/offline/network.ts
+new file mode 100644
+index 0000000..70ea881
+--- /dev/null
++++ b/packages/opencode/src/offline/network.ts
+@@ -0,0 +1,44 @@
++// Local deployment hardening for the community offline fork.
++// This guards JavaScript fetch in each imported realm, not raw sockets or child processes.
++import path from "node:path"
++import { fileURLToPath } from "node:url"
++
++const enabled = ["1", "true"].includes(process.env.OPENCODE_OFFLINE_MODE?.toLowerCase() ?? "")
++
++export function assertOfflineURL(input: string | URL | Request) {
++  const url = new URL(input instanceof Request ? input.url : String(input))
++  // OpenTUI's Yoga WASM is embedded as a binary data URL, not an outbound request.
++  if (/^data:application\/(?:octet-stream|wasm);base64,/i.test(url.href)) return
++  // Compiled Bun assets may use file URLs inside its virtual filesystem only.
++  // Host/UNC paths and ordinary disk file URLs are deliberately excluded.
++  if (url.protocol === "file:" && !url.hostname) {
++    const root = process.platform === "win32" ? "B:\\~BUN\\root" : "/$bunfs/root"
++    const file = (() => {
++      try { return fileURLToPath(url) } catch { return undefined }
++    })()
++    if (file) {
++      const relative = path.relative(root, file)
++      if (relative && relative !== ".." && !relative.startsWith(".." + path.sep) && !path.isAbsolute(relative)) return
++    }
++  }
++  if (!["http:", "https:"].includes(url.protocol) || !["127.0.0.1", "[::1]"].includes(url.hostname)) {
++    throw new Error("Offline mode blocks this network request; only literal loopback HTTP endpoints are allowed.")
++  }
++}
++
++if (enabled) {
++  const native = globalThis.fetch
++  const guarded = (async (input, init) => {
++    assertOfflineURL(input)
++    // Never let a permitted local endpoint automatically redirect to the internet.
++    const redirect = init?.redirect ?? (input instanceof Request ? input.redirect : undefined)
++    return native(input, { ...init, redirect: redirect === "manual" ? "manual" : "error" })
++  }) as typeof fetch
++  if (native.preconnect) {
++    guarded.preconnect = ((...args: Parameters<typeof native.preconnect>) => {
++      assertOfflineURL(args[0])
++      return native.preconnect(...args)
++    }) as typeof native.preconnect
++  }
++  globalThis.fetch = guarded
++}
+diff --git a/packages/opencode/src/permission/next.ts b/packages/opencode/src/permission/next.ts
+index 1e1df62..f4cf8e0 100644
+--- a/packages/opencode/src/permission/next.ts
++++ b/packages/opencode/src/permission/next.ts
+@@ -12,6 +12,8 @@ import os from "os"
+ import z from "zod"
+ 
+ export namespace PermissionNext {
++  // Local file mutations require a new approval for each exact tool call.
++  const perCall = new Set(["spark_files_replace_text", "spark_files_create_file"])
+   const log = Log.create({ service: "permission" })
+ 
+   function expand(pattern: string): string {
+@@ -136,7 +138,10 @@ export namespace PermissionNext {
+       const s = await state()
+       const { ruleset, ...request } = input
+       for (const pattern of request.patterns ?? []) {
+-        const rule = evaluate(request.permission, pattern, ruleset, s.approved)
++        const configured = evaluate(request.permission, pattern, ruleset)
++        const rule = perCall.has(request.permission)
++          ? { ...configured, action: configured.action === "deny" ? "deny" : "ask" }
++          : evaluate(request.permission, pattern, ruleset, s.approved)
+         log.info("evaluated", { permission: request.permission, pattern, action: rule })
+         if (rule.action === "deny")
+           throw new DeniedError(ruleset.filter((r) => Wildcard.match(request.permission, r.permission)))
+@@ -170,13 +175,14 @@ export namespace PermissionNext {
+       const s = await state()
+       const existing = s.pending[input.requestID]
+       if (!existing) return
++      const reply = perCall.has(existing.info.permission) && input.reply === "always" ? "once" : input.reply
+       delete s.pending[input.requestID]
+       Bus.publish(Event.Replied, {
+         sessionID: existing.info.sessionID,
+         requestID: existing.info.id,
+-        reply: input.reply,
++        reply,
+       })
+-      if (input.reply === "reject") {
++      if (reply === "reject") {
+         existing.reject(input.message ? new CorrectedError(input.message) : new RejectedError())
+         // Reject all other pending permissions for this session
+         const sessionID = existing.info.sessionID
+@@ -193,11 +199,11 @@ export namespace PermissionNext {
+         }
+         return
+       }
+-      if (input.reply === "once") {
++      if (reply === "once") {
+         existing.resolve()
+         return
+       }
+-      if (input.reply === "always") {
++      if (reply === "always") {
+         for (const pattern of existing.info.always) {
+           s.approved.push({
+             permission: existing.info.permission,
+@@ -211,6 +217,7 @@ export namespace PermissionNext {
+         const sessionID = existing.info.sessionID
+         for (const [id, pending] of Object.entries(s.pending)) {
+           if (pending.info.sessionID !== sessionID) continue
++          if (perCall.has(pending.info.permission)) continue
+           const ok = pending.info.patterns.every(
+             (pattern) => evaluate(pending.info.permission, pattern, s.approved).action === "allow",
+           )
+diff --git a/packages/opencode/src/server/server.ts b/packages/opencode/src/server/server.ts
+index 7dd9c33..46a9bdc 100644
+--- a/packages/opencode/src/server/server.ts
++++ b/packages/opencode/src/server/server.ts
+@@ -544,7 +544,11 @@ export namespace Server {
+         .all("/*", async (c) => {
+           // offline-fork: serve bundled web app in offline mode
+           const offline = await Offline.tryServeStaticFile(c.req.path)
+-          if (offline) return new Response(offline.body, { headers: { "Content-Type": offline.mime } })
++          if (offline) return new Response(offline.body, { headers: {
++            "Content-Type": offline.mime,
++            "Content-Security-Policy": Offline.webCSP,
++          } })
++          if (Offline.isEnabled()) return c.text("Offline web assets are missing; no remote UI was requested.", 503)
+ 
+           const path = c.req.path
+ 

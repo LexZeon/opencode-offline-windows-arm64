@@ -1,0 +1,44 @@
+# Local build trees and generated artifacts
+build-work/
+artifacts/
+runtime/
+toolchain/
+cache/
+source/
+node_modules/
+dist/
+.cache/
+build-receipt.json
+
+# Local state, private configuration and test recordings
+state/
+data/
+logs/
+*.log
+*.db
+*.db-*
+*.sqlite*
+*.env
+.env*
+*.local.json
+*.local.ps1
+*.har
+screenshots/
+recordings/
+
+# Binaries, models, SDKs and archives do not belong in this source package
+*.exe
+*.dll
+*.pdb
+*.wasm
+*.map
+*.zip
+*.7z
+*.tar
+*.gz
+*.gguf
+*.safetensors
+*.bin
+*.pt
+*.pth
+__pycache__/
