@@ -13,7 +13,7 @@ $sourceCommit = 'bcdbd58d57c1c38b13b3f9a3d8b423786f0e1d85'
 $bunVersion = '1.4.4'
 $bunUrl = 'https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-windows-aarch64.zip'
 $bunArchiveSha256 = '2d57a0eec0cb44d95c918c3f9734f60455a1306ae5085d76fc68f44e3ee30d09'
-$patchSha256 = 'a366955e510ad8cb694271ef7aad5b6d293dc5af3dc9a5958005b2edc8cf7e24'
+$patchSha256 = '11314970ea104fac57ad924e4ad432ebd0bd627ee70b5bb7685ec757a2a2e3e7'
 $packageRoot = Split-Path -Parent $PSScriptRoot
 $patchPath = Join-Path $packageRoot 'patches\windows-arm64-offline.patch'
 

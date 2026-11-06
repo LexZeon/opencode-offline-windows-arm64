@@ -1,5 +1,5 @@
 diff --git a/bun.lock b/bun.lock
-index 52bc415..33ead40 100644
+index 52bc415a7f3139091769c0f597f9b873e4c30c60..33ead4065fc96d566aecf1e4c5bde99e03018866 100644
 --- a/bun.lock
 +++ b/bun.lock
 @@ -295,6 +295,7 @@
@@ -38,10 +38,10 @@ index 52bc415..33ead40 100644
      "@actions/core": ["@actions/core@1.11.1", "", { "dependencies": { "@actions/exec": "^1.1.1", "@actions/http-client": "^2.0.1" } }, "sha512-hXJCSrkwfA46Vd9Z3q4cpEpHB1rL5NG04+/rbqW9d3+CSvtB1tYe8UTpAlixa1vj0m/ULglfEK2UKxMGxCxv5A=="],
 diff --git a/docs/windows-arm64-offline.md b/docs/windows-arm64-offline.md
 new file mode 100644
-index 0000000..3bd0e3f
+index 0000000000000000000000000000000000000000..de6d2f0e5ceabbf73cf4b9d8548ec7152692055f
 --- /dev/null
 +++ b/docs/windows-arm64-offline.md
-@@ -0,0 +1,147 @@
+@@ -0,0 +1,183 @@
 +# Windows ARM64 offline build
 +
 +This adds a native Windows ARM64 CLI target and makes the offline dependency
@@ -126,6 +126,29 @@ index 0000000..3bd0e3f
 +disable unused web tools and remote MCP servers. This fork predates newer config
 +fields such as `subagent_depth`; validate copied configuration against its schema.
 +
++## Paste images on Windows
++
++Use **Alt+V**, or click **Alt+V paste image** in the normal prompt footer, after
++copying an image bitmap, an image file in Explorer, or a local image path. Windows
++defaults include both `ctrl+v` and `alt+v`; a terminal host can intercept Ctrl+V
++before OpenCode receives it. No global terminal settings need to be changed.
++Ordinary clipboard text is still inserted as text. Empty clipboard input produces
++a short hint instead of silently doing nothing.
++
++The Windows clipboard reader supports `CF_HDROP` file lists (up to 16 files) as
++well as bitmaps. Local image paths accept matching single or double quotes,
++including spaces and Unicode names. Windows PowerShell runs hidden in STA mode
++with UTF-8 output, a timeout and a bounded output buffer. File content reads are
++bounded by the existing 64 MiB image-input limit and use the existing image codec
++for validation and normalization before attachment.
++
++Image files must be resident on a local fixed drive. UNC/device paths, mapped
++network drives, remote URLs, symlinks/junctions and online-only Cloud Files are
++rejected before content reads. Download an online-only image in Explorer first;
++the attachment helper does not request hydration. Failed attachments show a
++readable error. Terminal file-drop transport depends on the terminal host; when
++it only inserts a path, copying that path and using Alt+V is the explicit route.
++
 +## Behavior and validation
 +
 +In offline mode, missing web assets return HTTP 503 instead of proxying the
@@ -160,13 +183,26 @@ index 0000000..3bd0e3f
 +passed to the selected model. The same validation covers prompt attachments,
 +file reads, and image results from tools and MCP. Invalid base64, damaged images,
 +MIME mismatches, and oversized inputs produce a readable HTTP 400; the terminal
-+restores a failed draft. Animated AVIF uses its first frame.
++includes failed-draft restoration logic. Animated AVIF uses its first frame.
 +
 +The image update passed 47 targeted source tests, compiled API checks with mixed
 +valid/invalid concurrent requests, and real local-model AVIF/PNG inference. The
 +tests use synthetic data and two public libavif fixtures; their source and BSD
 +notice are included beside the fixtures. These checks do not establish image
 +support for every model or replace an operating-system network sandbox.
++
++The subsequent Windows clipboard/path update passed the opencode typecheck and
++all **41 image tests with 106 assertions**, including 33 focused clipboard,
++path and keybinding tests. The **35 source fetch-guard checks** also passed with
++zero redirect-destination requests. Native PowerShell UTF-8 serialization of a
++synthetic Unicode path and the metadata-to-AVIF-to-PNG path were checked without
++reading or changing the system clipboard. Both native CLI and web assets were
++rebuilt with Bun 1.4.4. These tests do not claim a physically automated drag-and-drop
++test or broad terminal-host compatibility.
++Separate controlled native clipboard checks passed for an Explorer-style AVIF
++file list with Unicode/spaces, a PNG bitmap, and a quoted text path; the prior
++clipboard data was restored. They used public/synthetic fixtures and did not
++test physical drag events or delivery of Alt+V by every terminal host.
 +
 +Run the guard check from `packages/opencode`:
 +
@@ -190,7 +226,7 @@ index 0000000..3bd0e3f
 +not verified to run offline. Keep runtime dependencies, provider configuration,
 +tool permissions, and any process-level network controls explicit.
 diff --git a/package.json b/package.json
-index 2e7c117..fd0ad1e 100644
+index 2e7c1172aa64c492150c8bbfb8d9c117cf864d7e..fd0ad1eae0af728b74fc7b09556c3844583d7fba 100644
 --- a/package.json
 +++ b/package.json
 @@ -105,6 +105,7 @@
@@ -202,7 +238,7 @@ index 2e7c117..fd0ad1e 100644
      "@openrouter/ai-sdk-provider@1.5.4": "patches/@openrouter%2Fai-sdk-provider@1.5.4.patch"
    }
 diff --git a/packages/app/src/components/prompt-input/attachments.ts b/packages/app/src/components/prompt-input/attachments.ts
-index a9e4e49..bd765bb 100644
+index a9e4e496512cfa52121519194b5fbc634c2064fa..bd765bb97377bd6176a133e82f25139f047510c5 100644
 --- a/packages/app/src/components/prompt-input/attachments.ts
 +++ b/packages/app/src/components/prompt-input/attachments.ts
 @@ -5,7 +5,7 @@ import { useLanguage } from "@/context/language"
@@ -215,7 +251,7 @@ index a9e4e49..bd765bb 100644
  const LARGE_PASTE_CHARS = 8000
  const LARGE_PASTE_BREAKS = 120
 diff --git a/packages/app/src/entry.tsx b/packages/app/src/entry.tsx
-index e9c0a43..3caa774 100644
+index e9c0a4397c99bbaafe415dd3f36b3fedc7fbfbe5..3caa774c5b637fa3202819da35b82bd48f0948c4 100644
 --- a/packages/app/src/entry.tsx
 +++ b/packages/app/src/entry.tsx
 @@ -68,7 +68,7 @@ const notify: Platform["notify"] = async (title, description, href) => {
@@ -228,7 +264,7 @@ index e9c0a43..3caa774 100644
  
    notification.onclick = () => {
 diff --git a/packages/app/src/pages/layout/sidebar-items.tsx b/packages/app/src/pages/layout/sidebar-items.tsx
-index 194f75f..eed0ac7 100644
+index 194f75f815b74dcb7347e19fe7796f4938409604..eed0ac7c0983eaa78677b7d0e542b3f63a166a08 100644
 --- a/packages/app/src/pages/layout/sidebar-items.tsx
 +++ b/packages/app/src/pages/layout/sidebar-items.tsx
 @@ -33,7 +33,7 @@ export const ProjectIcon = (props: { project: LocalProject; class?: string; noti
@@ -241,7 +277,7 @@ index 194f75f..eed0ac7 100644
            {...getAvatarColors(props.project.icon?.color)}
            class="size-full rounded"
 diff --git a/packages/opencode/package.json b/packages/opencode/package.json
-index 0e3594d..b856dd0 100644
+index 0e3594dc7d792b7f894007f892301ee8ba86ddfc..b856dd0dd7c1004cbdce0a9acb9b643ccbd47e8c 100644
 --- a/packages/opencode/package.json
 +++ b/packages/opencode/package.json
 @@ -80,6 +80,7 @@
@@ -261,7 +297,7 @@ index 0e3594d..b856dd0 100644
      "@solid-primitives/scheduled": "1.5.2",
      "@standard-schema/spec": "1.0.0",
 diff --git a/packages/opencode/script/build.ts b/packages/opencode/script/build.ts
-index 19353b6..b63a935 100755
+index 19353b67fe4996db3bc79d3e4356a72452f7cc6f..b63a935cef68f5e335a1f8863cfd08e96f40d8bf 100755
 --- a/packages/opencode/script/build.ts
 +++ b/packages/opencode/script/build.ts
 @@ -103,6 +103,10 @@ const allTargets: {
@@ -299,7 +335,7 @@ index 19353b6..b63a935 100755
      JSON.stringify(
        {
 diff --git a/packages/opencode/src/bun/index.ts b/packages/opencode/src/bun/index.ts
-index 7bd1e6a..ab2a29e 100644
+index 7bd1e6ac2ce52d9580e04769e0372b3009856375..ab2a29e20d28dceb452b1f8d3aadd1558c59babc 100644
 --- a/packages/opencode/src/bun/index.ts
 +++ b/packages/opencode/src/bun/index.ts
 @@ -66,7 +66,7 @@ export namespace BunProc {
@@ -312,10 +348,49 @@ index 7bd1e6a..ab2a29e 100644
  
      // Use lock to ensure only one install at a time
 diff --git a/packages/opencode/src/cli/cmd/tui/component/prompt/index.tsx b/packages/opencode/src/cli/cmd/tui/component/prompt/index.tsx
-index d63c248..f25b95e 100644
+index d63c248fb83e20d48416416be0759fa5aad79479..d49fd8138b9ea372cc3299da14cd5c6adb7e503c 100644
 --- a/packages/opencode/src/cli/cmd/tui/component/prompt/index.tsx
 +++ b/packages/opencode/src/cli/cmd/tui/component/prompt/index.tsx
-@@ -570,6 +570,23 @@ export function Prompt(props: PromptProps) {
+@@ -1,8 +1,6 @@
+ import { BoxRenderable, TextareaRenderable, MouseEvent, PasteEvent, t, dim, fg } from "@opentui/core"
+ import { createEffect, createMemo, type JSX, onMount, createSignal, onCleanup, on, Show, Switch, Match } from "solid-js"
+ import "opentui-spinner/solid"
+-import path from "path"
+-import { Filesystem } from "@/util/filesystem"
+ import { useLocal } from "@tui/context/local"
+ import { useTheme } from "@tui/context/theme"
+ import { EmptyBorder } from "@tui/component/border"
+@@ -21,6 +19,13 @@ import { useRenderer } from "@opentui/solid"
+ import { Editor } from "@tui/util/editor"
+ import { useExit } from "../../context/exit"
+ import { Clipboard } from "../../util/clipboard"
++import {
++  defaultImageLimits,
++  loadLocalImage,
++  parseLocalImagePath,
++  prepareImage,
++  type PreparedImage,
++} from "../../util/image-input"
+ import type { FilePart } from "@opencode-ai/sdk/v2"
+ import { TuiEvent } from "../../event"
+ import { iife } from "@/util/iife"
+@@ -200,14 +205,7 @@ export function Prompt(props: PromptProps) {
+         category: "Prompt",
+         hidden: true,
+         onSelect: async () => {
+-          const content = await Clipboard.read()
+-          if (content?.mime.startsWith("image/")) {
+-            await pasteImage({
+-              filename: "clipboard",
+-              mime: content.mime,
+-              content: content.data,
+-            })
+-          }
++          await pasteClipboard()
+         },
+       },
+       {
+@@ -570,6 +568,23 @@ export function Prompt(props: PromptProps) {
      // Capture mode before it gets reset
      const currentMode = store.mode
      const variant = local.model.variant.current()
@@ -339,7 +414,7 @@ index d63c248..f25b95e 100644
  
      if (store.mode === "shell") {
        sdk.client.session.shell({
-@@ -597,43 +614,51 @@ export function Prompt(props: PromptProps) {
+@@ -597,43 +612,51 @@ export function Prompt(props: PromptProps) {
        const restOfInput = firstLineEnd === -1 ? "" : inputText.slice(firstLineEnd + 1)
        const args = firstLineArgs.join(" ") + (restOfInput ? "\n" + restOfInput : "")
  
@@ -426,8 +501,174 @@ index d63c248..f25b95e 100644
      }
      history.append({
        ...store.prompt,
+@@ -693,7 +716,73 @@ export function Prompt(props: PromptProps) {
+     )
+   }
+ 
+-  async function pasteImage(file: { filename?: string; content: string; mime: string }) {
++  function imageLimits() {
++    const config = (
++      sync.data.config as {
++        attachment?: {
++          image?: { auto_resize?: boolean; max_width?: number; max_height?: number; max_base64_bytes?: number }
++        }
++      }
++    ).attachment?.image
++    return {
++      autoResize: config?.auto_resize ?? defaultImageLimits.autoResize,
++      maxWidth: config?.max_width ?? defaultImageLimits.maxWidth,
++      maxHeight: config?.max_height ?? defaultImageLimits.maxHeight,
++      maxBase64Bytes: config?.max_base64_bytes ?? defaultImageLimits.maxBase64Bytes,
++    }
++  }
++
++  function attachImage(file: PreparedImage) {
++    if (file.mime === "image/svg+xml") pasteText(file.content, `[SVG: ${file.filename ?? "image"}]`)
++    else pasteImage(file)
++  }
++
++  async function pasteClipboard() {
++    try {
++      const content = await Clipboard.read()
++      if (content?.files) {
++        const images: PreparedImage[] = []
++        for (const filepath of content.files) {
++          const image = await loadLocalImage(filepath, { limits: imageLimits() })
++          if (!image) throw new Error("Clipboard file list must contain supported local images")
++          images.push(image)
++        }
++        for (const image of images) attachImage(image)
++        return true
++      }
++      if (content?.mime === "text/plain" && content.data) {
++        const filepath = parseLocalImagePath(content.data)
++        if (filepath) {
++          const image = await loadLocalImage(content.data, { limits: imageLimits() })
++          if (image) attachImage(image)
++        } else {
++          const text = content.data.replace(/\r\n/g, "\n").replace(/\r/g, "\n")
++          const lines = (text.match(/\n/g)?.length ?? 0) + 1
++          if ((lines >= 3 || text.length > 150) && !sync.data.config.experimental?.disable_paste_summary)
++            pasteText(text, `[Pasted ~${lines} lines]`)
++          else input.insertText(text)
++        }
++        return true
++      }
++      if (!content?.mime.startsWith("image/")) {
++        toast.show({
++          variant: "info",
++          message: "Copy an image, image file or local image path, then use Alt+V",
++          duration: 3000,
++        })
++        return true
++      }
++      attachImage(
++        await prepareImage({ filename: "clipboard", mime: content.mime, content: content.data }, imageLimits()),
++      )
++      return true
++    } catch (error) {
++      toast.error(error)
++      return true
++    }
++  }
++
++  function pasteImage(file: PreparedImage) {
+     const currentOffset = input.visualCursor.offset
+     const extmarkStart = currentOffset
+     const count = store.prompt.parts.filter((x) => x.type === "file" && x.mime.startsWith("image/")).length
+@@ -841,17 +930,9 @@ export function Prompt(props: PromptProps) {
+                 // through bracketed paste, so we need to intercept the keypress and
+                 // directly read from clipboard before the terminal handles it
+                 if (keybind.match("input_paste", e)) {
+-                  const content = await Clipboard.read()
+-                  if (content?.mime.startsWith("image/")) {
+-                    e.preventDefault()
+-                    await pasteImage({
+-                      filename: "clipboard",
+-                      mime: content.mime,
+-                      content: content.data,
+-                    })
+-                    return
+-                  }
+-                  // If no image, let the default paste behavior continue
++                  e.preventDefault()
++                  await pasteClipboard()
++                  return
+                 }
+                 if (keybind.match("input_clear", e) && store.prompt.input !== "") {
+                   input.clear()
+@@ -927,38 +1008,17 @@ export function Prompt(props: PromptProps) {
+                   return
+                 }
+ 
+-                // trim ' from the beginning and end of the pasted content. just
+-                // ' and nothing else
+-                const filepath = pastedContent.replace(/^'+|'+$/g, "").replace(/\\ /g, " ")
+-                const isUrl = /^(https?):\/\//.test(filepath)
+-                if (!isUrl) {
+-                  try {
+-                    const mime = Filesystem.mimeType(filepath)
+-                    const filename = path.basename(filepath)
+-                    // Handle SVG as raw text content, not as base64 image
+-                    if (mime === "image/svg+xml") {
+-                      event.preventDefault()
+-                      const content = await Filesystem.readText(filepath).catch(() => {})
+-                      if (content) {
+-                        pasteText(content, `[SVG: ${filename ?? "image"}]`)
+-                        return
+-                      }
+-                    }
+-                    if (mime.startsWith("image/")) {
+-                      event.preventDefault()
+-                      const content = await Filesystem.readArrayBuffer(filepath)
+-                        .then((buffer) => Buffer.from(buffer).toString("base64"))
+-                        .catch(() => {})
+-                      if (content) {
+-                        await pasteImage({
+-                          filename,
+-                          mime,
+-                          content,
+-                        })
+-                        return
+-                      }
+-                    }
+-                  } catch {}
++                try {
++                  if (parseLocalImagePath(pastedContent)) {
++                    event.preventDefault()
++                    const image = await loadLocalImage(pastedContent, { limits: imageLimits() })
++                    if (image) attachImage(image)
++                    return
++                  }
++                } catch (error) {
++                  event.preventDefault()
++                  toast.error(error)
++                  return
+                 }
+ 
+                 const lineCount = (pastedContent.match(/\n/g)?.length ?? 0) + 1
+@@ -1128,6 +1188,19 @@ export function Prompt(props: PromptProps) {
+             <box gap={2} flexDirection="row">
+               <Switch>
+                 <Match when={store.mode === "normal"}>
++                  <Show when={process.platform === "win32"}>
++                    <box
++                      onMouseUp={() => {
++                        if (props.disabled) return
++                        input.focus()
++                        void pasteClipboard()
++                      }}
++                    >
++                      <text fg={theme.text}>
++                        Alt+V <span style={{ fg: theme.textMuted }}>paste image</span>
++                      </text>
++                    </box>
++                  </Show>
+                   <Show when={local.model.variant.list().length > 0}>
+                     <text fg={theme.text}>
+                       {keybind.print("variant_cycle")} <span style={{ fg: theme.textMuted }}>variants</span>
 diff --git a/packages/opencode/src/cli/cmd/tui/routes/session/index.tsx b/packages/opencode/src/cli/cmd/tui/routes/session/index.tsx
-index 6d418ee..3aee266 100644
+index 6d418ee7f130c633671844e2074c58033eb99c19..3aee266033d8fbec82c5a8f30925a7fdc44d99ea 100644
 --- a/packages/opencode/src/cli/cmd/tui/routes/session/index.tsx
 +++ b/packages/opencode/src/cli/cmd/tui/routes/session/index.tsx
 @@ -79,7 +79,8 @@ import { DialogExportOptions } from "../../ui/dialog-export-options"
@@ -440,8 +681,283 @@ index 6d418ee..3aee266 100644
  
  class CustomSpeedScroll implements ScrollAcceleration {
    constructor(private speed: number) {}
+diff --git a/packages/opencode/src/cli/cmd/tui/util/clipboard.ts b/packages/opencode/src/cli/cmd/tui/util/clipboard.ts
+index 1a8197bf4e81a172df4c6f6c5184648156631449..fc1917da6d59dc107792bd70e6be5037bcb94577 100644
+--- a/packages/opencode/src/cli/cmd/tui/util/clipboard.ts
++++ b/packages/opencode/src/cli/cmd/tui/util/clipboard.ts
+@@ -6,6 +6,8 @@ import { tmpdir } from "os"
+ import path from "path"
+ import { Filesystem } from "../../../../util/filesystem"
+ import { Process } from "../../../../util/process"
++import { execFile } from "node:child_process"
++import { promisify } from "node:util"
+ 
+ /**
+  * Writes text to clipboard via OSC 52 escape sequence.
+@@ -25,6 +27,32 @@ export namespace Clipboard {
+   export interface Content {
+     data: string
+     mime: string
++    files?: string[]
++  }
++
++  export function parseWindowsContent(text: string): Content | undefined {
++    if (!text.trim()) return
++    if (text.length > Math.ceil((64 * 1024 * 1024) / 3) * 4 + 1024)
++      throw new Error("Clipboard image exceeds the 64 MiB input limit")
++    const value = JSON.parse(text)
++    if (Array.isArray(value.files)) {
++      if (
++        value.files.length > 16 ||
++        value.files.some((p: unknown) => typeof p !== "string" || !p || p.length > 32768 || /[\0\r\n]/.test(p))
++      )
++        throw new Error("Clipboard file list is invalid or contains more than 16 files")
++      if (!value.files.length) return
++      return { data: "", mime: "application/x-opencode-file-list", files: value.files }
++    }
++    if (value.mime !== "image/png" || typeof value.data !== "string")
++      throw new Error("Clipboard image format is invalid")
++    const data = value.data
++    if (!data || data.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(data))
++      throw new Error("Clipboard image contains invalid base64")
++    const bytes = Buffer.from(data, "base64")
++    if (bytes.length > 64 * 1024 * 1024 || bytes.toString("base64") !== data)
++      throw new Error("Clipboard image is invalid or exceeds the 64 MiB input limit")
++    return { data, mime: "image/png" }
+   }
+ 
+   export async function read(): Promise<Content | undefined> {
+@@ -45,15 +73,37 @@ export namespace Clipboard {
+     }
+ 
+     if (os === "win32" || release().includes("WSL")) {
+-      const script =
+-        "Add-Type -AssemblyName System.Windows.Forms; $img = [System.Windows.Forms.Clipboard]::GetImage(); if ($img) { $ms = New-Object System.IO.MemoryStream; $img.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png); [System.Convert]::ToBase64String($ms.ToArray()) }"
+-      const base64 = await $`powershell.exe -NonInteractive -NoProfile -command "${script}"`.nothrow().text()
+-      if (base64) {
+-        const imageBuffer = Buffer.from(base64.trim(), "base64")
+-        if (imageBuffer.length > 0) {
+-          return { data: imageBuffer.toString("base64"), mime: "image/png" }
+-        }
+-      }
++      const script = `
++$ErrorActionPreference = 'Stop'
++[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
++Add-Type -AssemblyName System.Windows.Forms
++$files = [System.Windows.Forms.Clipboard]::GetFileDropList()
++if ($files.Count -gt 0) {
++  if ($files.Count -gt 16) { throw 'Paste at most 16 image files at once' }
++  @{ files = @($files) } | ConvertTo-Json -Compress
++  exit
++}
++$img = [System.Windows.Forms.Clipboard]::GetImage()
++if ($img) {
++  try {
++    if ([long]$img.Width * $img.Height -gt 67108864) { throw 'Clipboard image exceeds the 64 megapixel limit' }
++    $ms = New-Object System.IO.MemoryStream
++    try {
++      $img.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
++      if ($ms.Length -gt 67108864) { throw 'Clipboard image exceeds the 64 MiB limit' }
++      @{ mime = 'image/png'; data = [System.Convert]::ToBase64String($ms.ToArray()) } | ConvertTo-Json -Compress
++    } finally { $ms.Dispose() }
++  } finally { $img.Dispose() }
++}`
++      const result = await promisify(execFile)(
++        "powershell.exe",
++        ["-NonInteractive", "-NoProfile", "-STA", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")],
++        { encoding: "utf8", timeout: 10_000, maxBuffer: 90 * 1024 * 1024, windowsHide: true },
++      ).catch(() => {
++        throw new Error("Windows clipboard could not be read; copy the image again or paste its local file path")
++      })
++      const content = parseWindowsContent(result.stdout.toString())
++      if (content) return content
+     }
+ 
+     if (os === "linux") {
+diff --git a/packages/opencode/src/cli/cmd/tui/util/image-input.ts b/packages/opencode/src/cli/cmd/tui/util/image-input.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..7036391ac461eb0cc9c4abcc6371a48e99243813
+--- /dev/null
++++ b/packages/opencode/src/cli/cmd/tui/util/image-input.ts
+@@ -0,0 +1,176 @@
++import path from "node:path"
++import { lstat, open, realpath } from "node:fs/promises"
++import { fileURLToPath } from "node:url"
++import { execFile } from "node:child_process"
++import { promisify } from "node:util"
++import { MAX_INPUT_BYTES, normalize, type Limits } from "@/image/codec"
++
++const mimes: Record<string, string> = {
++  ".png": "image/png",
++  ".jpg": "image/jpeg",
++  ".jpeg": "image/jpeg",
++  ".gif": "image/gif",
++  ".webp": "image/webp",
++  ".avif": "image/avif",
++  ".svg": "image/svg+xml",
++}
++
++export const defaultImageLimits: Limits = {
++  autoResize: true,
++  maxWidth: 2000,
++  maxHeight: 2000,
++  maxBase64Bytes: 5 * 1024 * 1024,
++}
++
++export function parseLocalImagePath(input: string, platform: NodeJS.Platform = process.platform) {
++  let value = input.trim()
++  if (!value) return
++  const quoted = (value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))
++  if (quoted) value = value.slice(1, -1)
++  if (!/\.(png|jpe?g|gif|webp|avif|svg)(?:[?#:].*)?$/i.test(value)) return
++  if (value.length > 32768) throw new Error("Image path exceeds the supported length")
++  if (!quoted && /\s/.test(value) && !/[\\/]/.test(value)) return
++  if (/[\0\r\n]/.test(value)) throw new Error("Paste one local image path at a time")
++  if (/^file:/i.test(value)) {
++    const url = new URL(value)
++    if (url.hostname || url.search || url.hash) throw new Error("Only local image files are supported")
++    value = fileURLToPath(url)
++  } else if (/^[a-z][a-z\d+.-]*:/i.test(value) && !/^[a-z]:[\\/]/i.test(value)) {
++    throw new Error("Only local image files are supported; network URLs are not loaded")
++  }
++  if (/^(?:\\\\|\/\/)/.test(value)) throw new Error("Network and device image paths are not supported")
++  if (platform === "win32" && value.slice(/^[a-z]:/i.test(value) ? 2 : 0).includes(":"))
++    throw new Error("Alternate data stream image paths are not supported")
++  // Keep Windows separators intact; only POSIX shell escaping uses backslash-space.
++  if (platform !== "win32") value = value.replace(/\\ /g, " ")
++  return value
++}
++
++// Query metadata with OPEN_REPARSE_POINT before a data read. Cloud Files placeholders
++// must be made resident by the user; attaching an image must not hydrate them.
++const windowsMetadataScript = String.raw`
++$ErrorActionPreference = 'Stop'
++Add-Type -TypeDefinition @'
++using System;
++using System.IO;
++using System.Text;
++using System.Runtime.InteropServices;
++using Microsoft.Win32.SafeHandles;
++public static class ImageLocalMetadata {
++  [StructLayout(LayoutKind.Sequential)] struct TagInfo { public uint Attributes; public uint Tag; }
++  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern SafeFileHandle CreateFileW(string p, uint a, uint s, IntPtr sa, uint c, uint f, IntPtr t);
++  [DllImport("kernel32.dll", SetLastError=true)] static extern bool GetFileInformationByHandleEx(SafeFileHandle h, int k, out TagInfo i, uint n);
++  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern uint GetFinalPathNameByHandleW(SafeFileHandle h, StringBuilder p, uint n, uint f);
++  public static void Check(string value) {
++    string full = Path.GetFullPath(value);
++    if (new DriveInfo(Path.GetPathRoot(full)).DriveType != DriveType.Fixed)
++      throw new IOException("Only image files on a local fixed drive are supported");
++    string current = full;
++    bool leaf = true;
++    while (current != null) {
++      using (var handle = CreateFileW(current, 0x80, 7, IntPtr.Zero, 3, 0x02200000, IntPtr.Zero)) {
++        if (handle.IsInvalid) throw new IOException("Image metadata could not be opened");
++        TagInfo info;
++        if (!GetFileInformationByHandleEx(handle, 9, out info, 8)) throw new IOException("Image metadata is unavailable");
++        if ((info.Attributes & 0x400) != 0 && (info.Tag & 0xffff0fff) != 0x9000001a)
++          throw new IOException("Image symlinks and junctions are not supported");
++        if (leaf && (info.Attributes & (0x1000 | 0x40000 | 0x400000)) != 0)
++          throw new IOException("Image is online-only. Download it in Explorer before attaching it");
++        if (leaf && (info.Attributes & 0x10) != 0) throw new IOException("Choose an image file, not a folder");
++        var final = new StringBuilder(32768);
++        uint length = GetFinalPathNameByHandleW(handle, final, (uint)final.Capacity, 0);
++        if (length == 0 || length >= final.Capacity) throw new IOException("Image path could not be verified");
++        string actual = final.ToString();
++        if (actual.StartsWith(@"\\?\")) actual = actual.Substring(4);
++        if (!String.Equals(actual.TrimEnd('\\'), current.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
++          throw new IOException("Image path resolves outside its selected location");
++      }
++      leaf = false;
++      current = Path.GetDirectoryName(current);
++    }
++  }
++}
++'@
++try { [ImageLocalMetadata]::Check($env:OPENCODE_IMAGE_INPUT_PATH); 'ok' }
++catch { [Console]::Error.WriteLine($_.Exception.GetBaseException().Message); exit 1 }
++`
++
++async function inspectWindows(filepath: string) {
++  try {
++    await promisify(execFile)(
++      "powershell.exe",
++      [
++        "-NoProfile",
++        "-NonInteractive",
++        "-STA",
++        "-EncodedCommand",
++        Buffer.from(windowsMetadataScript, "utf16le").toString("base64"),
++      ],
++      {
++        env: { ...process.env, OPENCODE_IMAGE_INPUT_PATH: filepath },
++        timeout: 10_000,
++        maxBuffer: 16 * 1024,
++        windowsHide: true,
++      },
++    )
++  } catch (error) {
++    const message = (error as { stderr?: string }).stderr?.trim()
++    throw new Error(message || "Image metadata could not be verified")
++  }
++}
++
++export interface PreparedImage {
++  filename?: string
++  content: string
++  mime: string
++}
++
++export async function prepareImage(image: PreparedImage, limits = defaultImageLimits): Promise<PreparedImage> {
++  const result = await normalize(image.content, image.mime, limits)
++  return { filename: image.filename, mime: result.mime, content: result.base64 }
++}
++
++export async function loadLocalImage(
++  input: string,
++  options: {
++    limits?: Limits
++    platform?: NodeJS.Platform
++    inspectWindows?: (filepath: string) => Promise<void>
++  } = {},
++): Promise<PreparedImage | undefined> {
++  const platform = options.platform ?? process.platform
++  const value = parseLocalImagePath(input, platform)
++  if (!value) return
++  const filepath = path.resolve(value)
++  if (platform === "win32") await (options.inspectWindows ?? inspectWindows)(filepath)
++  const info = await lstat(filepath)
++  if (!info.isFile() || info.isSymbolicLink()) throw new Error("Choose a regular local image file")
++  const resolved = await realpath(filepath)
++  if (platform === "win32" ? resolved.toLowerCase() !== filepath.toLowerCase() : resolved !== filepath)
++    throw new Error("Image symlinks and junctions are not supported")
++  if (info.size > MAX_INPUT_BYTES) throw new Error("Image file exceeds the 64 MiB input limit")
++  const file = await open(filepath, "r")
++  try {
++    const current = await file.stat()
++    if (!current.isFile() || current.dev !== info.dev || current.ino !== info.ino)
++      throw new Error("Image file changed while it was being attached")
++    if (current.size > MAX_INPUT_BYTES) throw new Error("Image file exceeds the 64 MiB input limit")
++    const buffer = Buffer.alloc(current.size + 1)
++    let count = 0
++    while (count < buffer.length) {
++      const result = await file.read(buffer, count, buffer.length - count, count)
++      if (!result.bytesRead) break
++      count += result.bytesRead
++    }
++    if (count > current.size) throw new Error("Image file changed while it was being attached")
++    const content = buffer.subarray(0, count)
++    const mime = mimes[path.extname(filepath).toLowerCase()]
++    if (mime === "image/svg+xml") return { filename: path.basename(filepath), mime, content: content.toString("utf8") }
++    return await prepareImage(
++      { filename: path.basename(filepath), mime, content: content.toString("base64") },
++      options.limits,
++    )
++  } finally {
++    await file.close()
++  }
++}
 diff --git a/packages/opencode/src/cli/cmd/tui/worker.ts b/packages/opencode/src/cli/cmd/tui/worker.ts
-index bb5495c..625d163 100644
+index bb5495c481103c65e859db436a1d46dc7b19755e..625d163bccc2965ac02e4afec78932e46d4b8011 100644
 --- a/packages/opencode/src/cli/cmd/tui/worker.ts
 +++ b/packages/opencode/src/cli/cmd/tui/worker.ts
 @@ -1,3 +1,4 @@
@@ -450,7 +966,7 @@ index bb5495c..625d163 100644
  import { Server } from "@/server/server"
  import { Log } from "@/util/log"
 diff --git a/packages/opencode/src/config/config.ts b/packages/opencode/src/config/config.ts
-index 761ce23..5729d3e 100644
+index 761ce23f3d6c6343a69d046403fb0fa7f9f85884..613f99220bc37ac08900c4a6a055b696eefc96c2 100644
 --- a/packages/opencode/src/config/config.ts
 +++ b/packages/opencode/src/config/config.ts
 @@ -34,6 +34,7 @@ import { PackageRegistry } from "@/bun/registry"
@@ -503,7 +1019,20 @@ index 761ce23..5729d3e 100644
      const pkg = path.join(dir, "package.json")
      const targetVersion = Installation.isLocal() ? "*" : Installation.VERSION
  
-@@ -1023,6 +1031,21 @@ export namespace Config {
+@@ -835,7 +843,11 @@ export namespace Config {
+       agent_cycle_reverse: z.string().optional().default("shift+tab").describe("Previous agent"),
+       variant_cycle: z.string().optional().default("ctrl+t").describe("Cycle model variants"),
+       input_clear: z.string().optional().default("ctrl+c").describe("Clear input field"),
+-      input_paste: z.string().optional().default("ctrl+v").describe("Paste from clipboard"),
++      input_paste: z
++        .string()
++        .optional()
++        .default(process.platform === "win32" ? "ctrl+v,alt+v" : "ctrl+v")
++        .describe("Paste from clipboard (Alt+V also works when Windows Terminal intercepts Ctrl+V)"),
+       input_submit: z.string().optional().default("return").describe("Submit input"),
+       input_newline: z
+         .string()
+@@ -1023,6 +1035,21 @@ export namespace Config {
        logLevel: Log.Level.optional().describe("Log level"),
        tui: TUI.optional().describe("TUI specific settings"),
        server: Server.optional().describe("Server configuration for opencode serve and web commands"),
@@ -526,7 +1055,7 @@ index 761ce23..5729d3e 100644
          .record(z.string(), Command)
          .optional()
 diff --git a/packages/opencode/src/file/ripgrep.ts b/packages/opencode/src/file/ripgrep.ts
-index 7ec32a8..3828377 100644
+index 7ec32a8be2de07d38dd6fa3fdc5ad9ee1b362973..382837767cd0debd58fdbc7b676bb1924fde56d1 100644
 --- a/packages/opencode/src/file/ripgrep.ts
 +++ b/packages/opencode/src/file/ripgrep.ts
 @@ -144,7 +144,7 @@ export namespace Ripgrep {
@@ -540,7 +1069,7 @@ index 7ec32a8..3828377 100644
      const filepath = path.join(Global.Path.bin, "rg" + (process.platform === "win32" ? ".exe" : ""))
 diff --git a/packages/opencode/src/image/codec.ts b/packages/opencode/src/image/codec.ts
 new file mode 100644
-index 0000000..79f9e13
+index 0000000000000000000000000000000000000000..79f9e137a0b05329790fab75b05f015d8822f89e
 --- /dev/null
 +++ b/packages/opencode/src/image/codec.ts
 @@ -0,0 +1,257 @@
@@ -803,7 +1332,7 @@ index 0000000..79f9e13
 +}
 diff --git a/packages/opencode/src/image/image.ts b/packages/opencode/src/image/image.ts
 new file mode 100644
-index 0000000..ffe9246
+index 0000000000000000000000000000000000000000..ffe9246d605e9fe3969283bd785d299b6928719e
 --- /dev/null
 +++ b/packages/opencode/src/image/image.ts
 @@ -0,0 +1,43 @@
@@ -851,7 +1380,7 @@ index 0000000..ffe9246
 +  }
 +}
 diff --git a/packages/opencode/src/index.ts b/packages/opencode/src/index.ts
-index 9af7927..e8f5b2c 100644
+index 9af79278c061b2fe233fa2c9ede25172f114c93e..e8f5b2c3605038b9fce618753a209280e5118bc9 100644
 --- a/packages/opencode/src/index.ts
 +++ b/packages/opencode/src/index.ts
 @@ -1,3 +1,4 @@
@@ -860,7 +1389,7 @@ index 9af7927..e8f5b2c 100644
  import { hideBin } from "yargs/helpers"
  import { RunCommand } from "./cli/cmd/run"
 diff --git a/packages/opencode/src/offline/index.ts b/packages/opencode/src/offline/index.ts
-index 195d48d..5e1e84c 100644
+index 195d48d1121cf58a167830b953778c5ccb7cdbb9..5e1e84c06a4f8c6d002a8a6c6fb66db48b732e1c 100644
 --- a/packages/opencode/src/offline/index.ts
 +++ b/packages/opencode/src/offline/index.ts
 @@ -3,6 +3,22 @@ import { Flag } from "../flag/flag"
@@ -903,7 +1432,7 @@ index 195d48d..5e1e84c 100644
      const index = Bun.file(path.join(appDir, "index.html"))
 diff --git a/packages/opencode/src/offline/network.ts b/packages/opencode/src/offline/network.ts
 new file mode 100644
-index 0000000..01c9bc3
+index 0000000000000000000000000000000000000000..01c9bc323fcb2a7c522738cc49dacc485d057faf
 --- /dev/null
 +++ b/packages/opencode/src/offline/network.ts
 @@ -0,0 +1,51 @@
@@ -959,7 +1488,7 @@ index 0000000..01c9bc3
 +  globalThis.fetch = guarded
 +}
 diff --git a/packages/opencode/src/permission/next.ts b/packages/opencode/src/permission/next.ts
-index 1e1df62..f4cf8e0 100644
+index 1e1df62a3ce90c81dd66c6121ae41e3b9c92cde3..f4cf8e02f93d5748e37f1ddcda8bf1ce592baff5 100644
 --- a/packages/opencode/src/permission/next.ts
 +++ b/packages/opencode/src/permission/next.ts
 @@ -12,6 +12,8 @@ import os from "os"
@@ -1023,7 +1552,7 @@ index 1e1df62..f4cf8e0 100644
              (pattern) => evaluate(pending.info.permission, pattern, s.approved).action === "allow",
            )
 diff --git a/packages/opencode/src/server/routes/session.ts b/packages/opencode/src/server/routes/session.ts
-index 96e8436..712d1e5 100644
+index 96e84361279c96aadbb3f6541643e0058dffc422..712d1e54308cb8062aa6f9e92c5c42556d33bc19 100644
 --- a/packages/opencode/src/server/routes/session.ts
 +++ b/packages/opencode/src/server/routes/session.ts
 @@ -803,12 +803,14 @@ export const SessionRoutes = lazy(() =>
@@ -1045,7 +1574,7 @@ index 96e8436..712d1e5 100644
          })
        },
 diff --git a/packages/opencode/src/server/server.ts b/packages/opencode/src/server/server.ts
-index 7dd9c33..ad45a24 100644
+index 7dd9c33dc922314e07726d09e3a4602af3c62ffd..ad45a2433e22254ed78dd0e271746979ca7a7edf 100644
 --- a/packages/opencode/src/server/server.ts
 +++ b/packages/opencode/src/server/server.ts
 @@ -40,7 +40,7 @@ import { QuestionRoutes } from "./routes/question"
@@ -1082,7 +1611,7 @@ index 7dd9c33..ad45a24 100644
            const path = c.req.path
  
 diff --git a/packages/opencode/src/session/prompt.ts b/packages/opencode/src/session/prompt.ts
-index 75bd3c9..9c6371a 100644
+index 75bd3c9dfacacbfd857729050df034fd3dfd9bfe..9c6371ab211b4686b7c74087a6fae4873023e5ed 100644
 --- a/packages/opencode/src/session/prompt.ts
 +++ b/packages/opencode/src/session/prompt.ts
 @@ -45,6 +45,8 @@ import { LLM } from "./llm"
@@ -1182,7 +1711,7 @@ index 75bd3c9..9c6371a 100644
    }
  
 diff --git a/packages/opencode/src/tool/read.ts b/packages/opencode/src/tool/read.ts
-index c981ac1..983a6cd 100644
+index c981ac16e43c4d9897feaaee93a9df18006bbb0c..983a6cd1569f03b46ca9509687235d16e12e0dbf 100644
 --- a/packages/opencode/src/tool/read.ts
 +++ b/packages/opencode/src/tool/read.ts
 @@ -11,6 +11,7 @@ import { Instance } from "../project/instance"
@@ -1221,9 +1750,275 @@ index c981ac1..983a6cd 100644
        }
      }
  
+diff --git a/packages/opencode/test/image/clipboard-input.test.ts b/packages/opencode/test/image/clipboard-input.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..8c732425a034375bb944d9c383d1cf0da10b699b
+--- /dev/null
++++ b/packages/opencode/test/image/clipboard-input.test.ts
+@@ -0,0 +1,260 @@
++import { describe, expect, mock, spyOn, test } from "bun:test"
++import { readFileSync } from "node:fs"
++import * as fs from "node:fs/promises"
++import path from "node:path"
++import os from "node:os"
++import { pathToFileURL } from "node:url"
++import { MAX_INPUT_BYTES } from "../../src/image/codec"
++import { Clipboard } from "../../src/cli/cmd/tui/util/clipboard"
++import { Config } from "../../src/config/config"
++import { Keybind } from "../../src/util/keybind"
++import { loadLocalImage, parseLocalImagePath } from "../../src/cli/cmd/tui/util/image-input"
++import { tmpdir } from "../fixture/fixture"
++
++// The checked-in public libavif fixture is shared with codec.test.ts.
++const avif = readFileSync(new URL("./fixtures/white-1x1.avif", import.meta.url))
++const limits = { autoResize: true, maxWidth: 2000, maxHeight: 2000, maxBase64Bytes: 5 * 1024 * 1024 }
++const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=="
++
++function directory() {
++  return tmpdir({
++    dispose: async (dir) => {
++      const root = path.resolve(os.tmpdir())
++      const target = path.resolve(dir)
++      const same = (a: string, b: string) =>
++        process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b
++      if (!same(path.dirname(target), root) || !/^opencode-test-[a-z0-9]+$/.test(path.basename(target)))
++        throw new Error("Refusing cleanup outside the owned test temporary directory")
++      if (!same(path.dirname(await fs.realpath(target)), await fs.realpath(root)))
++        throw new Error("Refusing redirected test temporary directory cleanup")
++      await fs.rm(target, { recursive: true, force: true })
++    },
++  })
++}
++
++test("Windows paste defaults include a terminal-safe Alt+V alternative and preserve custom bindings", () => {
++  const value = Config.Keybinds.parse({}).input_paste
++  expect(value).toBe(process.platform === "win32" ? "ctrl+v,alt+v" : "ctrl+v")
++  const [ctrl, alt] = Keybind.parse("ctrl+v,alt+v")
++  expect(ctrl).toMatchObject({ name: "v", ctrl: true, meta: false })
++  expect(alt).toMatchObject({ name: "v", ctrl: false, meta: true })
++  expect(Keybind.match(ctrl, alt!)).toBe(false)
++  expect(Config.Keybinds.parse({ input_paste: "super+v" }).input_paste).toBe("super+v")
++})
++
++describe("local image path input", () => {
++  test("accepts a complete Windows image path with either surrounding quote style", () => {
++    const file = String.raw`C:\image folder\图像 one.AVIF`
++    expect(parseLocalImagePath(file, "win32")).toBe(file)
++    expect(parseLocalImagePath(`"${file}"`, "win32")).toBe(file)
++    expect(parseLocalImagePath(`'${file}'`, "win32")).toBe(file)
++    expect(parseLocalImagePath(`  "${file}"  `, "win32")).toBe(file)
++  })
++
++  test("accepts quoted POSIX paths and shell-escaped spaces", () => {
++    expect(parseLocalImagePath("'/tmp/image folder/one.png'", "linux")).toBe("/tmp/image folder/one.png")
++    expect(parseLocalImagePath(String.raw`/tmp/image\ folder/one.png`, "linux")).toBe("/tmp/image folder/one.png")
++  })
++
++  test("preserves ordinary non-image text for the prompt", () => {
++    for (const value of ["", "  ", "Please describe this image", "line one\nline two", "notes.txt", '"notes.txt"'])
++      expect(parseLocalImagePath(value)).toBeUndefined()
++  })
++
++  test.each([
++    "https://example.invalid/image.png",
++    "http://127.0.0.1/image.avif",
++    "ftp://example.invalid/image.jpg",
++    "file://example.invalid/share/image.png",
++    "https://example.invalid/image.png?download=1",
++  ])("refuses a remote or non-file image URL: %s", (value) => {
++    expect(() => parseLocalImagePath(value, "win32")).toThrow()
++  })
++
++  test.each([
++    String.raw`\\server\share\image.png`,
++    "//server/share/image.png",
++    String.raw`\\?\C:\images\image.avif`,
++    String.raw`\\.\C:\images\image.jpg`,
++  ])("refuses UNC and device paths: %s", (value) => {
++    expect(() => parseLocalImagePath(value, "win32")).toThrow()
++  })
++
++  test.each([
++    String.raw`C:\images\image.png:stream`,
++    String.raw`C:\images\image.png:stream:$DATA`,
++    String.raw`C:\images\document.txt:stream.png`,
++  ])("refuses Windows alternate data streams: %s", (value) => {
++    expect(() => parseLocalImagePath(value, "win32")).toThrow()
++  })
++
++  test("refuses control characters in an image path", () => {
++    for (const value of ["C:\\images\\one\ntwo.png", "C:\\images\\one\rtwo.png", "C:\\images\\one\0two.png"])
++      expect(() => parseLocalImagePath(value, "win32")).toThrow()
++  })
++})
++
++describe("local image file loading", () => {
++  test("does not inspect or read an ordinary text prompt", async () => {
++    const inspectWindows = mock(async (_file: string) => {})
++    expect(
++      await loadLocalImage("Please explain the attached diagram", { platform: "win32", inspectWindows }),
++    ).toBeUndefined()
++    expect(inspectWindows).not.toHaveBeenCalled()
++  })
++
++  test("normalizes an owned AVIF file after the Windows metadata check", async () => {
++    await using tmp = await directory()
++    const file = path.join(tmp.path, "image with spaces.avif")
++    await fs.writeFile(file, avif)
++    const inspectWindows = mock(async (_file: string) => {})
++    const result = await loadLocalImage(`"${file}"`, { platform: "win32", inspectWindows, limits })
++    expect(inspectWindows).toHaveBeenCalledTimes(1)
++    expect(inspectWindows).toHaveBeenCalledWith(file)
++    expect(result).toMatchObject({ filename: "image with spaces.avif", mime: "image/png" })
++    expect(Buffer.from(result!.content, "base64").subarray(0, 8)).toEqual(
++      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
++    )
++  })
++
++  test("accepts a native local file URL with encoded spaces", async () => {
++    await using tmp = await directory()
++    const file = path.join(tmp.path, "local image.avif")
++    await fs.writeFile(file, avif)
++    expect(parseLocalImagePath(pathToFileURL(file).href)).toBe(file)
++    expect(await loadLocalImage(pathToFileURL(file).href, { inspectWindows: async () => {}, limits })).toMatchObject({
++      filename: "local image.avif",
++      mime: "image/png",
++    })
++  })
++
++  test("a rejected metadata gate prevents file content reads", async () => {
++    await using tmp = await directory()
++    const file = path.join(tmp.path, "must-not-read.avif")
++    await fs.writeFile(file, avif)
++    const handle = await fs.open(file, "r")
++    const read = spyOn(Object.getPrototypeOf(handle), "read")
++    try {
++      const inspectWindows = mock(async (_file: string) => {
++        throw new Error("synthetic offline-only metadata")
++      })
++      await expect(loadLocalImage(file, { platform: "win32", inspectWindows })).rejects.toThrow(
++        "synthetic offline-only metadata",
++      )
++      expect(inspectWindows).toHaveBeenCalledWith(file)
++      expect(read).not.toHaveBeenCalled()
++    } finally {
++      read.mockRestore()
++      await handle.close()
++    }
++  })
++
++  test("checks Windows metadata before opening a nonexistent file", async () => {
++    await using tmp = await directory()
++    const file = path.join(tmp.path, "not-created.avif")
++    await expect(
++      loadLocalImage(file, {
++        platform: "win32",
++        inspectWindows: async () => {
++          throw new Error("synthetic metadata refusal")
++        },
++      }),
++    ).rejects.toThrow("synthetic metadata refusal")
++  })
++
++  test("rejects directories and damaged image files", async () => {
++    await using tmp = await directory()
++    const folder = path.join(tmp.path, "folder.png")
++    const file = path.join(tmp.path, "damaged.avif")
++    await fs.mkdir(folder)
++    await fs.writeFile(file, "synthetic invalid image bytes")
++    const options = { inspectWindows: async () => {}, limits }
++    await expect(loadLocalImage(folder, options)).rejects.toThrow("regular")
++    await expect(loadLocalImage(file, options)).rejects.toThrow("supported")
++  })
++
++  test("rejects an extension whose MIME does not match the image bytes", async () => {
++    await using tmp = await directory()
++    const file = path.join(tmp.path, "wrong.png")
++    await fs.writeFile(file, avif)
++    await expect(loadLocalImage(file, { inspectWindows: async () => {}, limits })).rejects.toThrow("MIME")
++  })
++
++  test("rejects an oversized sparse file before reading its contents", async () => {
++    await using tmp = await directory()
++    const file = path.join(tmp.path, "oversized.avif")
++    const handle = await fs.open(file, "w+")
++    await handle.truncate(MAX_INPUT_BYTES + 1)
++    const read = spyOn(Object.getPrototypeOf(handle), "read")
++    try {
++      await expect(loadLocalImage(file, { inspectWindows: async () => {}, limits })).rejects.toThrow("64 MiB")
++      expect(read).not.toHaveBeenCalled()
++      expect((await handle.stat()).size).toBe(MAX_INPUT_BYTES + 1)
++    } finally {
++      read.mockRestore()
++      await handle.close()
++    }
++  })
++
++  test("keeps the existing SVG text contract", async () => {
++    await using tmp = await directory()
++    const file = path.join(tmp.path, "shape.svg")
++    const content = '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>'
++    await fs.writeFile(file, content)
++    expect(await loadLocalImage(file, { inspectWindows: async () => {} })).toEqual({
++      filename: "shape.svg",
++      mime: "image/svg+xml",
++      content,
++    })
++  })
++})
++
++describe("Windows clipboard serialization", () => {
++  // Only the pure parser is called here; no test reads or changes the system clipboard.
++  test("returns no content for an empty response or empty file drop list", () => {
++    expect(Clipboard.parseWindowsContent("")).toBeUndefined()
++    expect(Clipboard.parseWindowsContent(" \r\n")).toBeUndefined()
++    expect(Clipboard.parseWindowsContent('{"files":[]}')).toBeUndefined()
++  })
++
++  test("preserves file drop ordering, Unicode and spaces", () => {
++    const files = [String.raw`C:\images\one image.avif`, String.raw`C:\images\图像二.png`]
++    expect(Clipboard.parseWindowsContent(JSON.stringify({ files }))).toEqual({
++      data: "",
++      mime: "application/x-opencode-file-list",
++      files,
++    })
++  })
++
++  test("accepts sixteen files and rejects a larger drop", () => {
++    const files = Array.from({ length: 16 }, (_, index) => String.raw`C:\images\${index}.png`)
++    expect(Clipboard.parseWindowsContent(JSON.stringify({ files }))?.files).toEqual(files)
++    expect(() =>
++      Clipboard.parseWindowsContent(JSON.stringify({ files: [...files, String.raw`C:\images\extra.png`] })),
++    ).toThrow()
++  })
++
++  test("rejects malformed file lists", () => {
++    for (const files of [[""], [1], ["one\ntwo.png"], ["one\0two.png"], ["a".repeat(32769)]])
++      expect(() => Clipboard.parseWindowsContent(JSON.stringify({ files }))).toThrow()
++  })
++
++  test("accepts a canonical PNG bitmap payload", () => {
++    expect(Clipboard.parseWindowsContent(JSON.stringify({ data: png, mime: "image/png" }))).toEqual({
++      data: png,
++      mime: "image/png",
++    })
++  })
++
++  test("rejects malformed JSON, unsupported payload shapes and invalid base64", () => {
++    for (const value of ["{", "null", "[]", '{"files":"image.png"}', '{"data":"Zg==","mime":"image/jpeg"}'])
++      expect(() => Clipboard.parseWindowsContent(value)).toThrow()
++    for (const data of ["", "Zg", "Zg=", "Zh==", "Zg==\n", "%%%="])
++      expect(() => Clipboard.parseWindowsContent(JSON.stringify({ data, mime: "image/png" }))).toThrow()
++  })
++
++  test("rejects an oversized clipboard response before parsing or decoding", () => {
++    const content = "A".repeat(Math.ceil(MAX_INPUT_BYTES / 3) * 4 + 1025)
++    expect(() => Clipboard.parseWindowsContent(content)).toThrow("64 MiB")
++  })
++})
 diff --git a/packages/opencode/test/image/codec.test.ts b/packages/opencode/test/image/codec.test.ts
 new file mode 100644
-index 0000000..9140012
+index 0000000000000000000000000000000000000000..9140012ff34193cd3e270651c3f3fdc2397a8023
 --- /dev/null
 +++ b/packages/opencode/test/image/codec.test.ts
 @@ -0,0 +1,68 @@
@@ -1297,7 +2092,7 @@ index 0000000..9140012
 +})
 diff --git a/packages/opencode/test/image/fixtures/LICENSE.libavif b/packages/opencode/test/image/fixtures/LICENSE.libavif
 new file mode 100644
-index 0000000..5f3a0e6
+index 0000000000000000000000000000000000000000..5f3a0e67d0c5053b90b6fd5623a2b44aa0b55b7d
 --- /dev/null
 +++ b/packages/opencode/test/image/fixtures/LICENSE.libavif
 @@ -0,0 +1,46 @@
@@ -1386,7 +2181,7 @@ HcmV?d00001
 
 diff --git a/packages/opencode/test/image/ingress.test.ts b/packages/opencode/test/image/ingress.test.ts
 new file mode 100644
-index 0000000..bd6c7e0
+index 0000000000000000000000000000000000000000..bd6c7e051f7351ae3170b540f3d1414a69439bcd
 --- /dev/null
 +++ b/packages/opencode/test/image/ingress.test.ts
 @@ -0,0 +1,98 @@
@@ -1490,7 +2285,7 @@ index 0000000..bd6c7e0
 +})
 diff --git a/packages/opencode/test/offline/fetch-guard.ts b/packages/opencode/test/offline/fetch-guard.ts
 new file mode 100644
-index 0000000..6906264
+index 0000000000000000000000000000000000000000..69062641b47c66423bcc6f2b871220ebb40abd88
 --- /dev/null
 +++ b/packages/opencode/test/offline/fetch-guard.ts
 @@ -0,0 +1,235 @@
@@ -1731,7 +2526,7 @@ index 0000000..6906264
 +process.exitCode = report.status === "pass" ? 0 : 1
 diff --git a/patches/@silvia-odwyer%2Fphoton-node@0.3.4.patch b/patches/@silvia-odwyer%2Fphoton-node@0.3.4.patch
 new file mode 100644
-index 0000000..da41cb7
+index 0000000000000000000000000000000000000000..da41cb715e0ad73cc875f655a3a3ee2de4aee7a9
 --- /dev/null
 +++ b/patches/@silvia-odwyer%2Fphoton-node@0.3.4.patch
 @@ -0,0 +1,285 @@
@@ -2022,7 +2817,7 @@ index 0000000..da41cb7
 + const wasmModule = new WebAssembly.Module(bytes);
 diff --git a/patches/LICENSE-Photon-Apache-2.0.txt b/patches/LICENSE-Photon-Apache-2.0.txt
 new file mode 100644
-index 0000000..1b16a2f
+index 0000000000000000000000000000000000000000..1b16a2f72f2ecefa7ca9caffabac278a05b27bba
 --- /dev/null
 +++ b/patches/LICENSE-Photon-Apache-2.0.txt
 @@ -0,0 +1,201 @@
@@ -2229,7 +3024,7 @@ index 0000000..1b16a2f
 +   limitations under the License.
 diff --git a/patches/NOTICE-Photon.txt b/patches/NOTICE-Photon.txt
 new file mode 100644
-index 0000000..1f6c843
+index 0000000000000000000000000000000000000000..1f6c84304317d99cc2f640a5a2b83e6efc294686
 --- /dev/null
 +++ b/patches/NOTICE-Photon.txt
 @@ -0,0 +1,31 @@
