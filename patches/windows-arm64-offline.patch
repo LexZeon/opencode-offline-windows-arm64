@@ -1,3 +1,219 @@
+diff --git a/bun.lock b/bun.lock
+index 52bc415..33ead40 100644
+--- a/bun.lock
++++ b/bun.lock
+@@ -295,6 +295,7 @@
+         "@gitlab/opencode-gitlab-auth": "1.3.3",
+         "@hono/standard-validator": "0.1.5",
+         "@hono/zod-validator": "catalog:",
++        "@jsquash/avif": "2.1.1",
+         "@modelcontextprotocol/sdk": "1.25.2",
+         "@octokit/graphql": "9.0.2",
+         "@octokit/rest": "catalog:",
+@@ -308,6 +309,7 @@
+         "@opentui/solid": "0.1.81",
+         "@parcel/watcher": "2.5.1",
+         "@pierre/diffs": "catalog:",
++        "@silvia-odwyer/photon-node": "0.3.4",
+         "@solid-primitives/event-bus": "1.1.2",
+         "@solid-primitives/scheduled": "1.5.2",
+         "@standard-schema/spec": "1.0.0",
+@@ -511,6 +513,7 @@
+     "tree-sitter-bash",
+   ],
+   "patchedDependencies": {
++    "@silvia-odwyer/photon-node@0.3.4": "patches/@silvia-odwyer%2Fphoton-node@0.3.4.patch",
+     "@openrouter/ai-sdk-provider@1.5.4": "patches/@openrouter%2Fai-sdk-provider@1.5.4.patch",
+     "@standard-community/standard-openapi@0.2.9": "patches/@standard-community%2Fstandard-openapi@0.2.9.patch",
+   },
+@@ -562,6 +565,9 @@
+     "zod": "4.1.8",
+   },
+   "packages": {
++    "wasm-feature-detect": ["wasm-feature-detect@1.9.0", "", {}, "sha512-zonE+xlIIYtxPy++L24ow0hAD8CICb4+FgPyROd3buyXIqsJvUEDkBgfCCoXOd1Hu3DUr0GOfnPIdcGV+YpNaA=="],
++    "@silvia-odwyer/photon-node": ["@silvia-odwyer/photon-node@0.3.4", "", {}, "sha512-bnly4BKB3KDTFxrUIcgCLbaeVVS8lrAkri1pEzskpmxu9MdfGQTy8b8EgcD83ywD3RPMsIulY8xJH5Awa+t9fA=="],
++    "@jsquash/avif": ["@jsquash/avif@2.1.1", "", { "dependencies": { "wasm-feature-detect": "^1.2.11" } }, "sha512-LMRxd0fMgfCLtobDh0/sFYJMMiRJTNYSEEWvRDKXlAeZ08t3gI5V+1thIT0XjXJ+SVG7Zug9B0XPyx0Ti5VRNA=="],
+     "@actions/artifact": ["@actions/artifact@5.0.1", "", { "dependencies": { "@actions/core": "^2.0.0", "@actions/github": "^6.0.1", "@actions/http-client": "^3.0.0", "@azure/storage-blob": "^12.29.1", "@octokit/core": "^5.2.1", "@octokit/plugin-request-log": "^1.0.4", "@octokit/plugin-retry": "^3.0.9", "@octokit/request": "^8.4.1", "@octokit/request-error": "^5.1.1", "@protobuf-ts/plugin": "^2.2.3-alpha.1", "archiver": "^7.0.1", "jwt-decode": "^3.1.2", "unzip-stream": "^0.3.1" } }, "sha512-dHJ5rHduhCKUikKTT9eXeWoUvfKia3IjR1sO/VTAV3DVAL4yMTRnl2iO5mcfiBjySHLwPNezwENAVskKYU5ymw=="],
+ 
+     "@actions/core": ["@actions/core@1.11.1", "", { "dependencies": { "@actions/exec": "^1.1.1", "@actions/http-client": "^2.0.1" } }, "sha512-hXJCSrkwfA46Vd9Z3q4cpEpHB1rL5NG04+/rbqW9d3+CSvtB1tYe8UTpAlixa1vj0m/ULglfEK2UKxMGxCxv5A=="],
+diff --git a/docs/windows-arm64-offline.md b/docs/windows-arm64-offline.md
+new file mode 100644
+index 0000000..3bd0e3f
+--- /dev/null
++++ b/docs/windows-arm64-offline.md
+@@ -0,0 +1,147 @@
++# Windows ARM64 offline build
++
++This adds a native Windows ARM64 CLI target and makes the offline dependency
++paths fail closed. It does not replace the existing Linux x64 bundle packager.
++
++## Build prerequisites
++
++- Windows on ARM64 and a native ARM64 Bun **1.4.4** runtime.
++- A checkout of this fork, with this patch, and Git available for the build.
++- Network access while installing the pinned build dependencies.
++
++Bun 1.3.10 can compile the CLI but cannot open the OpenTUI renderer on native
++Windows ARM64 because its `bun:ffi` implementation is disabled. Bun 1.4 enables
++that support; 1.4.4 is the version tested here. See the [Bun 1.4 release
++notes](https://bun.com/blog/bun-v1.4) and [the Windows ARM64 FFI
++fix](https://github.com/oven-sh/bun/pull/33696).
++
++Run these PowerShell commands from the repository root:
++
++```powershell
++bun --version
++bun -e 'console.log(process.platform, process.arch)'
++# Expected: 1.4.4, then win32 arm64
++bun install --frozen-lockfile
++
++# A local catalog avoids a models.dev request during compilation.
++# Supply explicit local provider/model definitions in the runtime config.
++Set-Content -LiteralPath './models-local.json' -Value '{}' -Encoding ascii
++$env:MODELS_DEV_API_JSON = (Resolve-Path './models-local.json').Path
++$env:OPENCODE_VERSION = '1.2.13'
++$env:OPENCODE_CHANNEL = 'local'
++
++Push-Location './packages/opencode'
++try { bun run script/build.ts --single --skip-install }
++finally { Pop-Location }
++bun run --cwd packages/app build
++```
++
++The CLI output is
++`packages/opencode/dist/opencode-windows-arm64/bin/opencode.exe`.
++The local web assets are in `packages/app/dist`.
++This process builds the application; it does not download language-model weights.
++
++## Prepare a separate runtime
++
++Use a dedicated directory for this fork. Set all four `XDG_CONFIG_HOME`,
++`XDG_DATA_HOME`, `XDG_CACHE_HOME`, and `XDG_STATE_HOME` variables to new directories
++before the process starts. Do not point this older fork at a newer OpenCode
++database or cache. Its cache initialization and database migrations have their
++own version assumptions.
++
++Also use separate `OPENCODE_TEST_HOME` and
++`OPENCODE_TEST_MANAGED_CONFIG_DIR` directories if the deployment must avoid
++loading the existing home or managed OpenCode settings. Use a fresh auth store.
++
++Enable the following settings before launching the compiled CLI:
++
++```powershell
++$env:OPENCODE_OFFLINE_MODE = 'true'
++$env:OPENCODE_OFFLINE_DEPS_PATH = '<absolute-runtime-directory>/deps'
++$env:OPENCODE_DISABLE_AUTOUPDATE = 'true'
++$env:OPENCODE_DISABLE_DEFAULT_PLUGINS = 'true'
++$env:OPENCODE_DISABLE_LSP_DOWNLOAD = 'true'
++$env:OPENCODE_DISABLE_MODELS_FETCH = 'true'
++$env:OPENCODE_DISABLE_PROJECT_CONFIG = 'true'
++$env:OPENCODE_DISABLE_EXTERNAL_SKILLS = 'true'
++$env:OPENCODE_DISABLE_CLAUDE_CODE = 'true'
++$env:OPENCODE_DISABLE_SHARE = 'true'
++```
++
++Prepare `deps/app` with the entire built web output, `deps/ripgrep/rg.exe` with a
++compatible local ripgrep binary, and `deps/models.json` with the local catalog.
++Ripgrep already on `PATH` is also supported. Required npm packages must already
++be present in `deps/node_modules`; offline mode will not install missing ones.
++Set `lsp: false` unless the required language servers have been staged locally.
++The existing dependency download and packaging scripts still select Linux x64
++binaries, so do not run them to prepare Windows dependencies.
++
++Configure only the intended local provider, using an explicit literal-loopback
++endpoint such as `http://127.0.0.1:11434/v1`, and the model IDs already installed
++at that endpoint. Set `share: "disabled"`, `autoupdate: false`, `plugin: []`, and
++disable unused web tools and remote MCP servers. This fork predates newer config
++fields such as `subagent_depth`; validate copied configuration against its schema.
++
++## Behavior and validation
++
++In offline mode, missing web assets return HTTP 503 instead of proxying the
++hosted UI. Missing ripgrep or npm dependencies fail without attempting a download.
++The CLI and TUI worker guard JavaScript `fetch` and `preconnect`: only literal
++loopback HTTP endpoints, inline data, process-registered Blob URLs, and embedded
++Bun virtual-file resources are permitted. Unknown or revoked Blob URLs and
++automatic redirects are rejected. Extra language grammars that use
++remote URLs are not registered; OpenTUI's bundled parsers remain available.
++
++The bundled web response includes a CSP restricting external asset and connection
++loads. Notification and project favicons use local assets. The named MCP tools
++`spark_files_replace_text` and `spark_files_create_file` always require a fresh
++approval unless denied: an `Always` response grants only that call, and cached
++approval cannot bypass the next request. This does not change the MCP tools'
++file-validation or mutation implementations.
++
++Observed validation on native Windows ARM64 with Bun 1.4.4:
++
++- Fresh checkout and frozen dependency installation built both CLI and web assets.
++- Native TUI startup and system-DLL FFI scalar, pointer, and double calls worked.
++- An isolated local-provider session read synthetic files and completed an exact
++  edit and a new-file creation only after approval. A later creation asked again;
++  rejecting it left the file absent. `Always` behaved as a one-call approval.
++- The local HTML response included the external-resource CSP.
++- The source and compiled fetch guards passed 35 checks covering local HTTP,
++  inline data, registered/revoked Blob URLs, misleading hostnames, UNC/file-path
++  boundaries, and redirect blocking.
++
++Image input is normalized before message persistence and before streaming response
++headers are committed. Local AVIF decoding is bundled as WASM; PNG/JPEG output is
++passed to the selected model. The same validation covers prompt attachments,
++file reads, and image results from tools and MCP. Invalid base64, damaged images,
++MIME mismatches, and oversized inputs produce a readable HTTP 400; the terminal
++restores a failed draft. Animated AVIF uses its first frame.
++
++The image update passed 47 targeted source tests, compiled API checks with mixed
++valid/invalid concurrent requests, and real local-model AVIF/PNG inference. The
++tests use synthetic data and two public libavif fixtures; their source and BSD
++notice are included beside the fixtures. These checks do not establish image
++support for every model or replace an operating-system network sandbox.
++
++Run the guard check from `packages/opencode`:
++
++```powershell
++bun run test/offline/fetch-guard.ts
++```
++
++These are functional checks, not model-quality or performance benchmarks. The
++earlier file-permission inference check used a short-context profile; the separate
++image checks used an existing 131,072-token backend. Neither establishes maximum
++context size or full GPU offload. Draft restoration was reviewed in source;
++backend rejection and subsequent-request recovery were exercised, while the TUI
++restoration branch was not separately tested through the UI.
++The Linux container offline suite was not rerun
++for this Windows adaptation. Browser packet capture was not performed: CSP headers
++and local HTML were checked, rather than claiming every browser feature was tested.
++
++The guard is not an operating-system egress sandbox. Raw sockets, child processes,
++and third-party worker realms can have separate network stacks. CSP does not stop
++a user opening an external link in another tab, and browser speech recognition is
++not verified to run offline. Keep runtime dependencies, provider configuration,
++tool permissions, and any process-level network controls explicit.
+diff --git a/package.json b/package.json
+index 2e7c117..fd0ad1e 100644
+--- a/package.json
++++ b/package.json
+@@ -105,6 +105,7 @@
+     "@types/node": "catalog:"
+   },
+   "patchedDependencies": {
++    "@silvia-odwyer/photon-node@0.3.4": "patches/@silvia-odwyer%2Fphoton-node@0.3.4.patch",
+     "@standard-community/standard-openapi@0.2.9": "patches/@standard-community%2Fstandard-openapi@0.2.9.patch",
+     "@openrouter/ai-sdk-provider@1.5.4": "patches/@openrouter%2Fai-sdk-provider@1.5.4.patch"
+   }
+diff --git a/packages/app/src/components/prompt-input/attachments.ts b/packages/app/src/components/prompt-input/attachments.ts
+index a9e4e49..bd765bb 100644
+--- a/packages/app/src/components/prompt-input/attachments.ts
++++ b/packages/app/src/components/prompt-input/attachments.ts
+@@ -5,7 +5,7 @@ import { useLanguage } from "@/context/language"
+ import { uuid } from "@/utils/uuid"
+ import { getCursorPosition } from "./editor-dom"
+ 
+-export const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"]
++export const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]
+ export const ACCEPTED_FILE_TYPES = [...ACCEPTED_IMAGE_TYPES, "application/pdf"]
+ const LARGE_PASTE_CHARS = 8000
+ const LARGE_PASTE_BREAKS = 120
 diff --git a/packages/app/src/entry.tsx b/packages/app/src/entry.tsx
 index e9c0a43..3caa774 100644
 --- a/packages/app/src/entry.tsx
@@ -24,6 +240,26 @@ index 194f75f..eed0ac7 100644
            }
            {...getAvatarColors(props.project.icon?.color)}
            class="size-full rounded"
+diff --git a/packages/opencode/package.json b/packages/opencode/package.json
+index 0e3594d..b856dd0 100644
+--- a/packages/opencode/package.json
++++ b/packages/opencode/package.json
+@@ -80,6 +80,7 @@
+     "@gitlab/opencode-gitlab-auth": "1.3.3",
+     "@hono/standard-validator": "0.1.5",
+     "@hono/zod-validator": "catalog:",
++    "@jsquash/avif": "2.1.1",
+     "@modelcontextprotocol/sdk": "1.25.2",
+     "@octokit/graphql": "9.0.2",
+     "@octokit/rest": "catalog:",
+@@ -93,6 +94,7 @@
+     "@opentui/solid": "0.1.81",
+     "@parcel/watcher": "2.5.1",
+     "@pierre/diffs": "catalog:",
++    "@silvia-odwyer/photon-node": "0.3.4",
+     "@solid-primitives/event-bus": "1.1.2",
+     "@solid-primitives/scheduled": "1.5.2",
+     "@standard-schema/spec": "1.0.0",
 diff --git a/packages/opencode/script/build.ts b/packages/opencode/script/build.ts
 index 19353b6..b63a935 100755
 --- a/packages/opencode/script/build.ts
@@ -75,6 +311,121 @@ index 7bd1e6a..ab2a29e 100644
      }
  
      // Use lock to ensure only one install at a time
+diff --git a/packages/opencode/src/cli/cmd/tui/component/prompt/index.tsx b/packages/opencode/src/cli/cmd/tui/component/prompt/index.tsx
+index d63c248..f25b95e 100644
+--- a/packages/opencode/src/cli/cmd/tui/component/prompt/index.tsx
++++ b/packages/opencode/src/cli/cmd/tui/component/prompt/index.tsx
+@@ -570,6 +570,23 @@ export function Prompt(props: PromptProps) {
+     // Capture mode before it gets reset
+     const currentMode = store.mode
+     const variant = local.model.variant.current()
++    const pending = { ...store.prompt, parts: [...store.prompt.parts] }
++    const failed = (error: unknown) => {
++      const data = typeof error === "object" && error !== null && "data" in error ? error.data : undefined
++      const message =
++        typeof data === "object" && data !== null && "message" in data && typeof data.message === "string"
++          ? data.message
++          : error instanceof Error
++            ? error.message
++            : "Failed to send prompt"
++      toast.show({ variant: "error", message, duration: 8000 })
++      // offline-fork: keep a rejected attachment editable without overwriting a new draft.
++      if (!store.prompt.input && store.prompt.parts.length === 0) {
++        setStore("prompt", pending)
++        input.setText(pending.input)
++        restoreExtmarksFromParts(pending.parts)
++      }
++    }
+ 
+     if (store.mode === "shell") {
+       sdk.client.session.shell({
+@@ -597,43 +614,51 @@ export function Prompt(props: PromptProps) {
+       const restOfInput = firstLineEnd === -1 ? "" : inputText.slice(firstLineEnd + 1)
+       const args = firstLineArgs.join(" ") + (restOfInput ? "\n" + restOfInput : "")
+ 
+-      sdk.client.session.command({
+-        sessionID,
+-        command: command.slice(1),
+-        arguments: args,
+-        agent: local.agent.current().name,
+-        model: `${selectedModel.providerID}/${selectedModel.modelID}`,
+-        messageID,
+-        variant,
+-        parts: nonTextParts
+-          .filter((x) => x.type === "file")
+-          .map((x) => ({
+-            id: Identifier.ascending("part"),
+-            ...x,
+-          })),
+-      })
++      sdk.client.session
++        .command(
++          {
++            sessionID,
++            command: command.slice(1),
++            arguments: args,
++            agent: local.agent.current().name,
++            model: `${selectedModel.providerID}/${selectedModel.modelID}`,
++            messageID,
++            variant,
++            parts: nonTextParts
++              .filter((x) => x.type === "file")
++              .map((x) => ({
++                id: Identifier.ascending("part"),
++                ...x,
++              })),
++          },
++          { throwOnError: true },
++        )
++        .catch(failed)
+     } else {
+       sdk.client.session
+-        .prompt({
+-          sessionID,
+-          ...selectedModel,
+-          messageID,
+-          agent: local.agent.current().name,
+-          model: selectedModel,
+-          variant,
+-          parts: [
+-            {
+-              id: Identifier.ascending("part"),
+-              type: "text",
+-              text: inputText,
+-            },
+-            ...nonTextParts.map((x) => ({
+-              id: Identifier.ascending("part"),
+-              ...x,
+-            })),
+-          ],
+-        })
+-        .catch(() => {})
++        .prompt(
++          {
++            sessionID,
++            ...selectedModel,
++            messageID,
++            agent: local.agent.current().name,
++            model: selectedModel,
++            variant,
++            parts: [
++              {
++                id: Identifier.ascending("part"),
++                type: "text",
++                text: inputText,
++              },
++              ...nonTextParts.map((x) => ({
++                id: Identifier.ascending("part"),
++                ...x,
++              })),
++            ],
++          },
++          { throwOnError: true },
++        )
++        .catch(failed)
+     }
+     history.append({
+       ...store.prompt,
 diff --git a/packages/opencode/src/cli/cmd/tui/routes/session/index.tsx b/packages/opencode/src/cli/cmd/tui/routes/session/index.tsx
 index 6d418ee..3aee266 100644
 --- a/packages/opencode/src/cli/cmd/tui/routes/session/index.tsx
@@ -99,7 +450,7 @@ index bb5495c..625d163 100644
  import { Server } from "@/server/server"
  import { Log } from "@/util/log"
 diff --git a/packages/opencode/src/config/config.ts b/packages/opencode/src/config/config.ts
-index 761ce23..faa0ec5 100644
+index 761ce23..5729d3e 100644
 --- a/packages/opencode/src/config/config.ts
 +++ b/packages/opencode/src/config/config.ts
 @@ -34,6 +34,7 @@ import { PackageRegistry } from "@/bun/registry"
@@ -119,25 +470,61 @@ index 761ce23..faa0ec5 100644
          process.env[value.key] = value.token
          log.debug("fetching remote config", { url: `${key}/.well-known/opencode` })
          const response = await fetch(`${key}/.well-known/opencode`)
-@@ -171,7 +172,9 @@ export namespace Config {
+@@ -171,12 +172,15 @@ export namespace Config {
          }
        }
  
 -      deps.push(
+-        iife(async () => {
+-          const shouldInstall = await needsInstall(dir)
+-          if (shouldInstall) await installDependencies(dir)
+-        }),
+-      )
 +      // offline-fork: stdio MCP needs no config-directory npm install.
 +      // Required provider/plugin packages must already be bundled and fail explicitly if absent.
-+      if (!Offline.isEnabled()) deps.push(
-         iife(async () => {
-           const shouldInstall = await needsInstall(dir)
-           if (shouldInstall) await installDependencies(dir)
-@@ -266,6 +269,7 @@ export namespace Config {
++      if (!Offline.isEnabled())
++        deps.push(
++          iife(async () => {
++            const shouldInstall = await needsInstall(dir)
++            if (shouldInstall) await installDependencies(dir)
++          }),
++        )
+ 
+       result.command = mergeDeep(result.command ?? {}, await loadCommand(dir))
+       result.agent = mergeDeep(result.agent, await loadAgent(dir))
+@@ -266,6 +270,10 @@ export namespace Config {
    }
  
    export async function installDependencies(dir: string) {
-+    if (Offline.isEnabled()) throw new Error("Offline mode does not install config dependencies. Preinstall required local packages before starting.")
++    if (Offline.isEnabled())
++      throw new Error(
++        "Offline mode does not install config dependencies. Preinstall required local packages before starting.",
++      )
      const pkg = path.join(dir, "package.json")
      const targetVersion = Installation.isLocal() ? "*" : Installation.VERSION
  
+@@ -1023,6 +1031,21 @@ export namespace Config {
+       logLevel: Log.Level.optional().describe("Log level"),
+       tui: TUI.optional().describe("TUI specific settings"),
+       server: Server.optional().describe("Server configuration for opencode serve and web commands"),
++      // offline-fork: validate and normalize image inputs before providers receive them.
++      attachment: z
++        .object({
++          image: z
++            .object({
++              auto_resize: z.boolean().optional(),
++              max_width: z.number().int().positive().optional(),
++              max_height: z.number().int().positive().optional(),
++              max_base64_bytes: z.number().int().positive().optional(),
++            })
++            .strict()
++            .optional(),
++        })
++        .strict()
++        .optional(),
+       command: z
+         .record(z.string(), Command)
+         .optional()
 diff --git a/packages/opencode/src/file/ripgrep.ts b/packages/opencode/src/file/ripgrep.ts
 index 7ec32a8..3828377 100644
 --- a/packages/opencode/src/file/ripgrep.ts
@@ -151,6 +538,318 @@ index 7ec32a8..3828377 100644
      }
  
      const filepath = path.join(Global.Path.bin, "rg" + (process.platform === "win32" ? ".exe" : ""))
+diff --git a/packages/opencode/src/image/codec.ts b/packages/opencode/src/image/codec.ts
+new file mode 100644
+index 0000000..79f9e13
+--- /dev/null
++++ b/packages/opencode/src/image/codec.ts
+@@ -0,0 +1,257 @@
++// CPU-only image ingress. Both session APIs use this boundary before a provider sees image bytes.
++// @ts-ignore Bun embeds these resources in compiled executables.
++import avifWasm from "@jsquash/avif/codec/dec/avif_dec.wasm" with { type: "file" }
++// @ts-ignore Bun embeds these resources in compiled executables.
++import photonWasm from "@silvia-odwyer/photon-node/photon_rs_bg.wasm" with { type: "file" }
++import { readFileSync } from "node:fs"
++import path from "node:path"
++import { fileURLToPath } from "node:url"
++
++export const INPUT_MIMES = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"] as const
++export const MAX_INPUT_BYTES = 64 * 1024 * 1024
++export const MAX_PIXELS = 64 * 1024 * 1024
++const JPEG_QUALITIES = [80, 85, 70, 55, 40]
++
++export class ImageInputError extends Error {
++  constructor(
++    readonly kind: "data_url" | "base64" | "format" | "mime" | "decode" | "input_size" | "dimensions" | "size",
++    message: string,
++    readonly details: Record<string, number | string> = {},
++  ) {
++    super(message)
++    this.name = "ImageInputError"
++  }
++}
++
++export interface Limits {
++  readonly autoResize: boolean
++  readonly maxWidth: number
++  readonly maxHeight: number
++  readonly maxBase64Bytes: number
++}
++
++function canonical(mime: string) {
++  return mime.toLowerCase() === "image/jpg" ? "image/jpeg" : mime.toLowerCase()
++}
++
++export function parseDataUrl(url: string, mime: string) {
++  if (url.length > Math.ceil(MAX_INPUT_BYTES / 3) * 4 + 128)
++    throw new ImageInputError("input_size", "Image file exceeds the 64 MiB input limit")
++  const match = /^data:(image\/[a-z0-9.+-]+);base64,([A-Za-z0-9+/]*={0,2})$/i.exec(url)
++  if (!match) throw new ImageInputError("data_url", "Image must be a base64 data URL with an explicit image MIME type")
++  if (canonical(match[1]) !== canonical(mime))
++    throw new ImageInputError("mime", "Image MIME type does not match its data URL")
++  return { mime: canonical(mime), base64: match[2] }
++}
++
++function bytesFromBase64(value: string) {
++  if (value.length > Math.ceil(MAX_INPUT_BYTES / 3) * 4)
++    throw new ImageInputError("input_size", "Image file exceeds the 64 MiB input limit")
++  if (!value || value.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(value))
++    throw new ImageInputError("base64", "Image contains invalid or incomplete base64 data")
++  const bytes = Buffer.from(value, "base64")
++  if (bytes.toString("base64") !== value) throw new ImageInputError("base64", "Image contains noncanonical base64 data")
++  if (bytes.length > MAX_INPUT_BYTES)
++    throw new ImageInputError("input_size", "Image file exceeds the 64 MiB input limit")
++  return bytes
++}
++
++// Read dimensions before allocating a decoded pixel buffer, including AVIF's nested ISO-BMFF ispe properties.
++function inspect(bytes: Buffer) {
++  if (bytes.length >= 24 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])))
++    return { mime: "image/png", width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) }
++  if (bytes.length >= 10 && ["GIF87a", "GIF89a"].includes(bytes.toString("ascii", 0, 6)))
++    return { mime: "image/gif", width: bytes.readUInt16LE(6), height: bytes.readUInt16LE(8) }
++  if (bytes.length >= 4 && bytes[0] === 255 && bytes[1] === 216) {
++    let offset = 2
++    while (offset + 4 <= bytes.length) {
++      if (bytes[offset++] !== 255) break
++      while (bytes[offset] === 255) offset++
++      const marker = bytes[offset++]
++      if (marker === 217 || marker === 218) break
++      if (marker === 1 || (marker >= 208 && marker <= 215)) continue
++      if (offset + 2 > bytes.length) break
++      const size = bytes.readUInt16BE(offset)
++      if (size < 2 || offset + size > bytes.length) break
++      if ([192, 193, 194, 195, 197, 198, 199, 201, 202, 203, 205, 206, 207].includes(marker) && size >= 8)
++        return { mime: "image/jpeg", width: bytes.readUInt16BE(offset + 5), height: bytes.readUInt16BE(offset + 3) }
++      offset += size
++    }
++    throw new ImageInputError("decode", "JPEG image is damaged or has no readable dimensions")
++  }
++  if (bytes.length >= 30 && bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP") {
++    let offset = 12
++    while (offset + 8 <= bytes.length) {
++      const type = bytes.toString("ascii", offset, offset + 4)
++      const size = bytes.readUInt32LE(offset + 4)
++      const start = offset + 8
++      if (start + size > bytes.length) break
++      if (type === "VP8X" && size >= 10)
++        return {
++          mime: "image/webp",
++          width: bytes.readUIntLE(start + 4, 3) + 1,
++          height: bytes.readUIntLE(start + 7, 3) + 1,
++        }
++      if (type === "VP8 " && size >= 10 && bytes.subarray(start + 3, start + 6).equals(Buffer.from([157, 1, 42])))
++        return {
++          mime: "image/webp",
++          width: bytes.readUInt16LE(start + 6) & 16383,
++          height: bytes.readUInt16LE(start + 8) & 16383,
++        }
++      if (type === "VP8L" && size >= 5 && bytes[start] === 47) {
++        const bits = bytes.readUInt32LE(start + 1)
++        return { mime: "image/webp", width: (bits & 16383) + 1, height: ((bits >>> 14) & 16383) + 1 }
++      }
++      offset = start + size + (size & 1)
++    }
++    throw new ImageInputError("decode", "WebP image is damaged or has no readable dimensions")
++  }
++  if (bytes.length >= 16 && bytes.toString("ascii", 4, 8) === "ftyp") {
++    const ftypSize = bytes.readUInt32BE(0)
++    if (ftypSize < 16 || ftypSize > bytes.length) throw new ImageInputError("decode", "AVIF file header is damaged")
++    const brands = [bytes.toString("ascii", 8, 12)]
++    for (let offset = 16; offset + 4 <= ftypSize; offset += 4) brands.push(bytes.toString("ascii", offset, offset + 4))
++    if (!brands.some((brand) => brand === "avif" || brand === "avis"))
++      throw new ImageInputError(
++        "format",
++        "This image container is not AVIF; supported inputs are PNG, JPEG, GIF, WebP and AVIF",
++      )
++    const sizes: Array<{ width: number; height: number }> = []
++    const visit = (start: number, end: number, depth: number) => {
++      if (depth > 8) throw new ImageInputError("decode", "AVIF image has excessively nested metadata")
++      for (let offset = start; offset + 8 <= end; ) {
++        const type = bytes.toString("ascii", offset + 4, offset + 8)
++        const declared = bytes.readUInt32BE(offset)
++        const header = declared === 1 ? 16 : 8
++        if (offset + header > end) throw new ImageInputError("decode", "AVIF image metadata is truncated")
++        const size =
++          declared === 0 ? end - offset : declared === 1 ? Number(bytes.readBigUInt64BE(offset + 8)) : declared
++        if (!Number.isSafeInteger(size) || size < header || offset + size > end)
++          throw new ImageInputError("decode", "AVIF image metadata has an invalid box size")
++        if (type === "ispe" && size >= header + 12)
++          sizes.push({
++            width: bytes.readUInt32BE(offset + header + 4),
++            height: bytes.readUInt32BE(offset + header + 8),
++          })
++        // Sequence-only AVIF stores its canvas in tkhd rather than an item ispe property.
++        if (type === "tkhd") {
++          const version = bytes[offset + header]
++          const minimum = version === 1 ? 96 : version === 0 ? 84 : 0
++          if (!minimum || size < header + minimum) throw new ImageInputError("decode", "AVIF track header is damaged")
++          const width = Math.ceil(bytes.readUInt32BE(offset + size - 8) / 65536)
++          const height = Math.ceil(bytes.readUInt32BE(offset + size - 4) / 65536)
++          if (width || height) sizes.push({ width, height })
++        }
++        if (["meta", "iprp", "ipco", "moov", "trak"].includes(type))
++          visit(offset + header + (type === "meta" ? 4 : 0), offset + size, depth + 1)
++        offset += size
++      }
++    }
++    visit(0, bytes.length, 0)
++    if (!sizes.length) throw new ImageInputError("decode", "AVIF image has no readable dimensions")
++    for (const size of sizes) checkDimensions(size.width, size.height)
++    return { mime: "image/avif", ...sizes.reduce((a, b) => (a.width * a.height >= b.width * b.height ? a : b)) }
++  }
++  throw new ImageInputError("format", "Image bytes are not a supported PNG, JPEG, GIF, WebP or AVIF image")
++}
++
++function checkDimensions(width: number, height: number) {
++  if (!width || !height || width * height > MAX_PIXELS)
++    throw new ImageInputError("dimensions", "Image dimensions are invalid or exceed the 64 megapixel decode limit", {
++      width,
++      height,
++      maxPixels: MAX_PIXELS,
++    })
++}
++
++function embeddedPath(value: string) {
++  return path.isAbsolute(value) ? value : fileURLToPath(new URL(value, import.meta.url))
++}
++
++let photonPromise: Promise<typeof import("@silvia-odwyer/photon-node")> | undefined
++function loadPhoton() {
++  return (photonPromise ??= Promise.resolve().then(() => {
++    ;(globalThis as typeof globalThis & { __OPENCODE_PHOTON_WASM_PATH?: string }).__OPENCODE_PHOTON_WASM_PATH =
++      embeddedPath(photonWasm)
++    return import("@silvia-odwyer/photon-node")
++  }))
++}
++
++let avifPromise: Promise<typeof import("@jsquash/avif/decode.js")> | undefined
++function loadAvif() {
++  return (avifPromise ??= import("@jsquash/avif/decode.js").then(async (module) => {
++    const wasmPath = embeddedPath(avifWasm)
++    const options = { wasmBinary: new Uint8Array(readFileSync(wasmPath)), locateFile: () => wasmPath }
++    await module.init(options)
++    return module
++  }))
++}
++
++export async function normalize(base64: string, mime: string, limits: Limits) {
++  const bytes = bytesFromBase64(base64)
++  const info = inspect(bytes)
++  if (canonical(mime) !== info.mime)
++    throw new ImageInputError("mime", `Declared image MIME type does not match its ${info.mime} bytes`)
++  checkDimensions(info.width, info.height)
++  const photon = await loadPhoton()
++  const decoded = await (async () => {
++    try {
++      if (info.mime !== "image/avif") return photon.PhotonImage.new_from_byteslice(bytes)
++      const avif = await loadAvif()
++      // decode() returns the primary still image / first frame. It never forwards AVIF to the model.
++      const image = await avif.default(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength))
++      if (!image) throw new Error("empty decoded image")
++      checkDimensions(image.width, image.height)
++      return new photon.PhotonImage(new Uint8Array(image.data), image.width, image.height)
++    } catch (error) {
++      if (error instanceof ImageInputError) throw error
++      throw new ImageInputError("decode", `The ${info.mime} image is damaged or could not be decoded`)
++    }
++  })()
++  try {
++    const width = decoded.get_width()
++    const height = decoded.get_height()
++    checkDimensions(width, height)
++    const over = width > limits.maxWidth || height > limits.maxHeight || base64.length > limits.maxBase64Bytes
++    if (!over && info.mime !== "image/avif") return { base64, mime: info.mime, width, height }
++    const sizeError = () =>
++      new ImageInputError(
++        "size",
++        `Image ${width}x${height} exceeds the configured ${limits.maxWidth}x${limits.maxHeight}/${limits.maxBase64Bytes} base64-byte limit`,
++        {
++          width,
++          height,
++          bytes: base64.length,
++          maxWidth: limits.maxWidth,
++          maxHeight: limits.maxHeight,
++          maxBytes: limits.maxBase64Bytes,
++        },
++      )
++    if (over && !limits.autoResize) throw sizeError()
++    const scale = over ? Math.min(1, limits.maxWidth / width, limits.maxHeight / height) : 1
++    let size = { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) }
++    for (let step = 0; step < 32; step++) {
++      const resized =
++        size.width === width && size.height === height
++          ? decoded
++          : photon.resize(decoded, size.width, size.height, photon.SamplingFilter.Lanczos3)
++      try {
++        const encoders: Array<readonly [string, () => Uint8Array]> = [
++          ["image/png", () => resized.get_bytes()],
++          ...JPEG_QUALITIES.map((quality) => ["image/jpeg", () => resized.get_bytes_jpeg(quality)] as const),
++        ]
++        for (const [mime, encode] of encoders) {
++          const candidate = Buffer.from(encode()).toString("base64")
++          if (candidate.length <= limits.maxBase64Bytes) return { base64: candidate, mime, ...size }
++        }
++      } finally {
++        if (resized !== decoded) resized.free()
++      }
++      if (!limits.autoResize || (size.width === 1 && size.height === 1)) break
++      size = { width: Math.max(1, Math.floor(size.width * 0.75)), height: Math.max(1, Math.floor(size.height * 0.75)) }
++    }
++    throw sizeError()
++  } finally {
++    decoded.free()
++  }
++}
+diff --git a/packages/opencode/src/image/image.ts b/packages/opencode/src/image/image.ts
+new file mode 100644
+index 0000000..ffe9246
+--- /dev/null
++++ b/packages/opencode/src/image/image.ts
+@@ -0,0 +1,43 @@
++import z from "zod"
++import { NamedError } from "@opencode-ai/util/error"
++import { Config } from "../config/config"
++import { ImageInputError, normalize as normalizeBytes, parseDataUrl } from "./codec"
++
++export namespace Image {
++  export const InputError = NamedError.create(
++    "ImageInputError",
++    z.object({
++      message: z.string(),
++      kind: z.string(),
++      details: z.record(z.string(), z.union([z.string(), z.number()])),
++    }),
++  )
++
++  export function isImage(input: { mime: string; url: string }) {
++    return input.mime.toLowerCase().startsWith("image/") || /^data:image\//i.test(input.url)
++  }
++
++  export async function attachments<T extends { mime: string; url: string }>(parts?: T[]): Promise<T[] | undefined> {
++    if (!parts) return
++    return Promise.all(parts.map((part) => (isImage(part) ? normalize(part) : part)))
++  }
++
++  export async function normalize<T extends { mime: string; url: string }>(input: T): Promise<T> {
++    const config = (await Config.get()).attachment?.image
++    try {
++      const parsed = parseDataUrl(input.url, input.mime)
++      const output = await normalizeBytes(parsed.base64, parsed.mime, {
++        autoResize: config?.auto_resize ?? true,
++        maxWidth: config?.max_width ?? 2000,
++        maxHeight: config?.max_height ?? 2000,
++        maxBase64Bytes: config?.max_base64_bytes ?? 5 * 1024 * 1024,
++      })
++      return { ...input, mime: output.mime, url: `data:${output.mime};base64,${output.base64}` }
++    } catch (error) {
++      if (!(error instanceof ImageInputError)) throw error
++      const failure = new InputError({ message: error.message, kind: error.kind, details: error.details })
++      failure.message = error.message
++      throw failure
++    }
++  }
++}
 diff --git a/packages/opencode/src/index.ts b/packages/opencode/src/index.ts
 index 9af7927..e8f5b2c 100644
 --- a/packages/opencode/src/index.ts
@@ -204,27 +903,34 @@ index 195d48d..5e1e84c 100644
      const index = Bun.file(path.join(appDir, "index.html"))
 diff --git a/packages/opencode/src/offline/network.ts b/packages/opencode/src/offline/network.ts
 new file mode 100644
-index 0000000..70ea881
+index 0000000..01c9bc3
 --- /dev/null
 +++ b/packages/opencode/src/offline/network.ts
-@@ -0,0 +1,44 @@
+@@ -0,0 +1,51 @@
 +// Local deployment hardening for the community offline fork.
 +// This guards JavaScript fetch in each imported realm, not raw sockets or child processes.
 +import path from "node:path"
 +import { fileURLToPath } from "node:url"
++import { resolveObjectURL } from "node:buffer"
 +
 +const enabled = ["1", "true"].includes(process.env.OPENCODE_OFFLINE_MODE?.toLowerCase() ?? "")
 +
 +export function assertOfflineURL(input: string | URL | Request) {
 +  const url = new URL(input instanceof Request ? input.url : String(input))
-+  // OpenTUI's Yoga WASM is embedded as a binary data URL, not an outbound request.
-+  if (/^data:application\/(?:octet-stream|wasm);base64,/i.test(url.href)) return
++  // Inline data and registered Blob URLs are resolved locally by fetch, without network I/O.
++  // This includes image data downloaded by the AI SDK and OpenTUI's embedded WASM.
++  if (url.protocol === "data:") return
++  if (url.protocol === "blob:" && resolveObjectURL(url.href)) return
 +  // Compiled Bun assets may use file URLs inside its virtual filesystem only.
 +  // Host/UNC paths and ordinary disk file URLs are deliberately excluded.
 +  if (url.protocol === "file:" && !url.hostname) {
 +    const root = process.platform === "win32" ? "B:\\~BUN\\root" : "/$bunfs/root"
 +    const file = (() => {
-+      try { return fileURLToPath(url) } catch { return undefined }
++      try {
++        return fileURLToPath(url)
++      } catch {
++        return undefined
++      }
 +    })()
 +    if (file) {
 +      const relative = path.relative(root, file)
@@ -316,20 +1022,1245 @@ index 1e1df62..f4cf8e0 100644
            const ok = pending.info.patterns.every(
              (pattern) => evaluate(pending.info.permission, pattern, s.approved).action === "allow",
            )
+diff --git a/packages/opencode/src/server/routes/session.ts b/packages/opencode/src/server/routes/session.ts
+index 96e8436..712d1e5 100644
+--- a/packages/opencode/src/server/routes/session.ts
++++ b/packages/opencode/src/server/routes/session.ts
+@@ -803,12 +803,14 @@ export const SessionRoutes = lazy(() =>
+       ),
+       validator("json", SessionPrompt.PromptInput.omit({ sessionID: true })),
+       async (c) => {
++        const sessionID = c.req.valid("param").sessionID
++        const body = c.req.valid("json")
++        // offline-fork: validate and save inputs before committing streaming HTTP headers.
++        const message = await SessionPrompt.prompt({ ...body, sessionID, noReply: true })
+         c.status(200)
+         c.header("Content-Type", "application/json")
+         return stream(c, async (stream) => {
+-          const sessionID = c.req.valid("param").sessionID
+-          const body = c.req.valid("json")
+-          const msg = await SessionPrompt.prompt({ ...body, sessionID })
++          const msg = body.noReply ? message : await SessionPrompt.loop({ sessionID })
+           stream.write(JSON.stringify(msg))
+         })
+       },
 diff --git a/packages/opencode/src/server/server.ts b/packages/opencode/src/server/server.ts
-index 7dd9c33..46a9bdc 100644
+index 7dd9c33..ad45a24 100644
 --- a/packages/opencode/src/server/server.ts
 +++ b/packages/opencode/src/server/server.ts
-@@ -544,7 +544,11 @@ export namespace Server {
+@@ -40,7 +40,7 @@ import { QuestionRoutes } from "./routes/question"
+ import { PermissionRoutes } from "./routes/permission"
+ import { GlobalRoutes } from "./routes/global"
+ import { MDNS } from "./mdns"
+-import { Offline } from "../offline"  // offline-fork
++import { Offline } from "../offline" // offline-fork
+ 
+ // @ts-ignore This global is needed to prevent ai-sdk from logging warnings to stdout https://github.com/vercel/ai/blob/2dc67e0ef538307f21368db32d5a12345d98831b/packages/ai/src/logger/log-warnings.ts#L85
+ globalThis.AI_SDK_LOG_WARNINGS = false
+@@ -68,6 +68,7 @@ export namespace Server {
+             let status: ContentfulStatusCode
+             if (err instanceof NotFoundError) status = 404
+             else if (err instanceof Provider.ModelNotFoundError) status = 400
++            else if (err.name === "ImageInputError") status = 400
+             else if (err.name.startsWith("Worktree")) status = 400
+             else status = 500
+             return c.json(err.toObject(), { status })
+@@ -544,7 +545,14 @@ export namespace Server {
          .all("/*", async (c) => {
            // offline-fork: serve bundled web app in offline mode
            const offline = await Offline.tryServeStaticFile(c.req.path)
 -          if (offline) return new Response(offline.body, { headers: { "Content-Type": offline.mime } })
-+          if (offline) return new Response(offline.body, { headers: {
-+            "Content-Type": offline.mime,
-+            "Content-Security-Policy": Offline.webCSP,
-+          } })
++          if (offline)
++            return new Response(offline.body, {
++              headers: {
++                "Content-Type": offline.mime,
++                "Content-Security-Policy": Offline.webCSP,
++              },
++            })
 +          if (Offline.isEnabled()) return c.text("Offline web assets are missing; no remote UI was requested.", 503)
  
            const path = c.req.path
  
+diff --git a/packages/opencode/src/session/prompt.ts b/packages/opencode/src/session/prompt.ts
+index 75bd3c9..9c6371a 100644
+--- a/packages/opencode/src/session/prompt.ts
++++ b/packages/opencode/src/session/prompt.ts
+@@ -45,6 +45,8 @@ import { LLM } from "./llm"
+ import { iife } from "@/util/iife"
+ import { Shell } from "@/shell/shell"
+ import { Truncate } from "@/tool/truncation"
++import { Image } from "@/image/image"
++import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js"
+ 
+ // @ts-ignore
+ globalThis.AI_SDK_LOG_WARNINGS = false
+@@ -820,6 +822,8 @@ export namespace SessionPrompt {
+             },
+             output,
+           )
++          // offline-fork: plugin and built-in image results must pass the same ingress checks.
++          output.attachments = await Image.attachments(output.attachments)
+           return output
+         },
+       })
+@@ -867,10 +871,33 @@ export namespace SessionPrompt {
+           result,
+         )
+ 
++        // offline-fork: MCP content is also sent directly to the model, so normalize it before copying attachments.
++        const content = await Promise.all(
++          result.content.map(async (item: CallToolResult["content"][number]) => {
++            if (item.type === "image") {
++              const image = await Image.normalize({
++                mime: item.mimeType,
++                url: `data:${item.mimeType};base64,${item.data}`,
++              })
++              return { ...item, mimeType: image.mime, data: image.url.slice(image.url.indexOf(",") + 1) }
++            }
++            if (item.type === "resource" && "blob" in item.resource && item.resource.mimeType?.startsWith("image/")) {
++              const image = await Image.normalize({
++                mime: item.resource.mimeType,
++                url: `data:${item.resource.mimeType};base64,${item.resource.blob}`,
++              })
++              return {
++                ...item,
++                resource: { ...item.resource, mimeType: image.mime, blob: image.url.slice(image.url.indexOf(",") + 1) },
++              }
++            }
++            return item
++          }),
++        )
+         const textParts: string[] = []
+         const attachments: Omit<MessageV2.FilePart, "id" | "sessionID" | "messageID">[] = []
+ 
+-        for (const contentItem of result.content) {
++        for (const contentItem of content) {
+           if (contentItem.type === "text") {
+             textParts.push(contentItem.text)
+           } else if (contentItem.type === "image") {
+@@ -881,10 +908,10 @@ export namespace SessionPrompt {
+             })
+           } else if (contentItem.type === "resource") {
+             const { resource } = contentItem
+-            if (resource.text) {
++            if ("text" in resource && resource.text) {
+               textParts.push(resource.text)
+             }
+-            if (resource.blob) {
++            if ("blob" in resource && resource.blob) {
+               attachments.push({
+                 type: "file",
+                 mime: resource.mimeType ?? "application/octet-stream",
+@@ -912,7 +939,7 @@ export namespace SessionPrompt {
+             sessionID: ctx.sessionID,
+             messageID: input.processor.message.id,
+           })),
+-          content: result.content, // directly return content to preserve ordering when outputting to model
++          content, // directly return normalized content to preserve ordering when outputting to model
+         }
+       }
+       tools[key] = item
+@@ -1307,14 +1334,18 @@ export namespace SessionPrompt {
+       },
+     )
+ 
++    // offline-fork: one boundary covers TUI, web/API, files, and plugin-added images.
++    const normalized = await Promise.all(
++      parts.map((part) => (part.type === "file" && Image.isImage(part) ? Image.normalize(part) : part)),
++    )
+     await Session.updateMessage(info)
+-    for (const part of parts) {
++    for (const part of normalized) {
+       await Session.updatePart(part)
+     }
+ 
+     return {
+       info,
+-      parts,
++      parts: normalized,
+     }
+   }
+ 
+diff --git a/packages/opencode/src/tool/read.ts b/packages/opencode/src/tool/read.ts
+index c981ac1..983a6cd 100644
+--- a/packages/opencode/src/tool/read.ts
++++ b/packages/opencode/src/tool/read.ts
+@@ -11,6 +11,7 @@ import { Instance } from "../project/instance"
+ import { assertExternalDirectory } from "./external-directory"
+ import { InstructionPrompt } from "../session/instruction"
+ import { Filesystem } from "../util/filesystem"
++import { Image } from "../image/image"
+ 
+ const DEFAULT_READ_LIMIT = 2000
+ const MAX_LINE_LENGTH = 2000
+@@ -123,6 +124,11 @@ export const ReadTool = Tool.define("read", {
+     const isPdf = mime === "application/pdf"
+     if (isImage || isPdf) {
+       const msg = `${isImage ? "Image" : "PDF"} read successfully`
++      const attachment = {
++        type: "file" as const,
++        mime,
++        url: `data:${mime};base64,${Buffer.from(await Filesystem.readBytes(filepath)).toString("base64")}`,
++      }
+       return {
+         title,
+         output: msg,
+@@ -131,13 +137,8 @@ export const ReadTool = Tool.define("read", {
+           truncated: false,
+           loaded: instructions.map((i) => i.filepath),
+         },
+-        attachments: [
+-          {
+-            type: "file",
+-            mime,
+-            url: `data:${mime};base64,${Buffer.from(await Filesystem.readBytes(filepath)).toString("base64")}`,
+-          },
+-        ],
++        // offline-fork: image files share the same validation and codec as user attachments.
++        attachments: [isImage ? await Image.normalize(attachment) : attachment],
+       }
+     }
+ 
+diff --git a/packages/opencode/test/image/codec.test.ts b/packages/opencode/test/image/codec.test.ts
+new file mode 100644
+index 0000000..9140012
+--- /dev/null
++++ b/packages/opencode/test/image/codec.test.ts
+@@ -0,0 +1,68 @@
++import { describe, expect, test } from "bun:test"
++import { readFileSync } from "node:fs"
++import { ImageInputError, normalize, parseDataUrl } from "../../src/image/codec"
++
++// Public libavif fixtures, commit e760e8f05375cbd0c6d72065b18cac4542b13092:
++// https://github.com/AOMediaCodec/libavif/tree/e760e8f05375cbd0c6d72065b18cac4542b13092/tests/data
++const still = readFileSync(new URL("./fixtures/white-1x1.avif", import.meta.url))
++const animation = readFileSync(new URL("./fixtures/colors-animated-8bpc.avif", import.meta.url))
++const limits = { autoResize: true, maxWidth: 2000, maxHeight: 2000, maxBase64Bytes: 5 * 1024 * 1024 }
++
++function sequenceOnly() {
++  const bytes = Buffer.from(animation)
++  for (let offset = 8; offset + 4 <= bytes.readUInt32BE(0); offset += 4)
++    if (bytes.toString("ascii", offset, offset + 4) === "avif") bytes.write("avis", offset, "ascii")
++  for (let offset = 0; offset + 8 <= bytes.length; offset += bytes.readUInt32BE(offset))
++    if (bytes.toString("ascii", offset + 4, offset + 8) === "meta") bytes.write("free", offset + 4, "ascii")
++  return bytes
++}
++
++describe("image codec", () => {
++  test("transcodes a real AVIF into a decodable PNG", async () => {
++    const image = await normalize(still.toString("base64"), "image/avif", limits)
++    expect(image).toMatchObject({ mime: "image/png", width: 1, height: 1 })
++    expect(Buffer.from(image.base64, "base64").subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
++    expect(await normalize(image.base64, image.mime, limits)).toEqual(image)
++  })
++
++  test("rejects malformed URLs, base64, mismatched MIME, and damaged bytes", async () => {
++    expect(() => parseDataUrl("file:///image.avif", "image/avif")).toThrow(ImageInputError)
++    expect(() => parseDataUrl("data:image/png;base64,AAAA", "image/avif")).toThrow("does not match")
++    await expect(normalize("Zg", "image/avif", limits)).rejects.toThrow("base64")
++    await expect(normalize("Zh==", "image/avif", limits)).rejects.toThrow("noncanonical")
++    await expect(normalize(still.toString("base64"), "image/png", limits)).rejects.toThrow("MIME")
++    await expect(normalize(still.subarray(0, 32).toString("base64"), "image/avif", limits)).rejects.toThrow(
++      ImageInputError,
++    )
++    expect((await normalize(still.toString("base64"), "image/avif", limits)).width).toBe(1)
++  })
++
++  test("preserves configured limits without bypassing auto_resize false", async () => {
++    await expect(
++      normalize(animation.toString("base64"), "image/avif", { ...limits, maxWidth: 1, autoResize: false }),
++    ).rejects.toThrow("configured")
++    const image = await normalize(animation.toString("base64"), "image/avif", { ...limits, maxWidth: 1, maxHeight: 1 })
++    expect(image.width).toBe(1)
++    expect(image.height).toBe(1)
++    await expect(normalize(still.toString("base64"), "image/avif", { ...limits, maxBase64Bytes: 8 })).rejects.toThrow(
++      "configured",
++    )
++  })
++
++  test("decodes the primary frame of animated and sequence-only AVIF", async () => {
++    const primary = await normalize(animation.toString("base64"), "image/avif", limits)
++    const sequence = await normalize(sequenceOnly().toString("base64"), "image/avif", limits)
++    expect(primary).toMatchObject({ mime: "image/png", width: 150, height: 150 })
++    expect(sequence).toEqual(primary)
++  })
++
++  test("rejects oversized track dimensions before AVIF decoding", async () => {
++    const bytes = sequenceOnly()
++    const tag = bytes.indexOf("tkhd")
++    expect(tag).toBeGreaterThan(0)
++    const end = tag - 4 + bytes.readUInt32BE(tag - 4)
++    bytes.writeUInt32BE(0xffff0000, end - 8)
++    bytes.writeUInt32BE(0xffff0000, end - 4)
++    await expect(normalize(bytes.toString("base64"), "image/avif", limits)).rejects.toThrow("64 megapixel")
++  })
++})
+diff --git a/packages/opencode/test/image/fixtures/LICENSE.libavif b/packages/opencode/test/image/fixtures/LICENSE.libavif
+new file mode 100644
+index 0000000..5f3a0e6
+--- /dev/null
++++ b/packages/opencode/test/image/fixtures/LICENSE.libavif
+@@ -0,0 +1,46 @@
++License and provenance for the two libavif test fixtures in this directory
++======================================================================
++
++These notices apply to white-1x1.avif and colors-animated-8bpc.avif only.
++The filenames in this directory preserve the upstream bytes; white-1x1.avif
++was renamed from upstream white_1x1.avif.
++
++Upstream commit: e760e8f05375cbd0c6d72065b18cac4542b13092
++Upstream fixture licensing and descriptions:
++https://github.com/AOMediaCodec/libavif/blob/e760e8f05375cbd0c6d72065b18cac4542b13092/tests/data/README.md
++Upstream license:
++https://github.com/AOMediaCodec/libavif/blob/e760e8f05375cbd0c6d72065b18cac4542b13092/LICENSE
++
++white-1x1.avif (305 bytes)
++Source: https://github.com/AOMediaCodec/libavif/blob/e760e8f05375cbd0c6d72065b18cac4542b13092/tests/data/white_1x1.avif
++SHA256: ea4e43d1f07e4c00de16c13afa32376111bb306e51f08212cf4c1b6064df3667
++
++colors-animated-8bpc.avif (1235 bytes)
++Source: https://github.com/AOMediaCodec/libavif/blob/e760e8f05375cbd0c6d72065b18cac4542b13092/tests/data/colors-animated-8bpc.avif
++SHA256: 2f8683d21725261f37f86e115f0c212cc52d0fefd3a2ddfcc4fa648c1859906d
++
++The upstream test-data README identifies both files as licensed the same as
++libavif. The applicable general BSD 2-Clause notice from that commit follows:
++
++Copyright 2019 Joe Drago. All rights reserved.
++
++Redistribution and use in source and binary forms, with or without
++modification, are permitted provided that the following conditions are met:
++
++1. Redistributions of source code must retain the above copyright notice, this
++list of conditions and the following disclaimer.
++
++2. Redistributions in binary form must reproduce the above copyright notice,
++this list of conditions and the following disclaimer in the documentation
++and/or other materials provided with the distribution.
++
++THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
++AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
++IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
++DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
++FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
++DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
++SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
++CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
++OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
++OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+diff --git a/packages/opencode/test/image/fixtures/colors-animated-8bpc.avif b/packages/opencode/test/image/fixtures/colors-animated-8bpc.avif
+new file mode 100644
+index 0000000000000000000000000000000000000000..afa875d1030cb48429efab1e0bb97044a6d5259a
+GIT binary patch
+literal 1235
+zcma)5Pe>GD6o0e3$|kF<x{=AUj;z!MBD;2p=&-hnB_R=1P#tod*=fI=&zW|<7K{F@
+zh@CnZkpx`|Aqu*L)TzM2g2=FrLWDuL@FHCV!QT63H`k4@$Gmy({oY?b-UEPcQ(SSh
+zB69%=rAaz>%@lL(1Du&D&NOqdFLfB*t2`$(ibG1|4Xfa(01nedMJH*oVJbyxlfwij
+z1r+2MvuvG=EZKx0`!`VTMNTj_DwCwA9gUn1VY0MhGL^9{TeiH&oPvY+G3Mwt$_R6v
+z90ejxmpSaPF-Cwt7!0BaX~k4#96|)O>b6xF)vYnC+z9n0gmy89Yve=1!2*hJA^_l9
+z;<jBxXp9&028~PfJ(gdqk}(Ma)X|)k7>R8$5UH`#<-~sojP{)o1#JZVc`+jU%L+C9
+ztE<-iRjb-d&Kf&SSmn)d8*+xAP3X#5t|*6AGB#^VM0w2(reSP1H@1J9Q}fj5f44@_
+zxVH(BBF`I`SDArobQzv6Y7}zbws`)~<$|Spu}Y^ahAq_Zxx%G<BC0V-dnB!`H9cq=
+zU*agL#6(I%-|;~;V`IY$9#Z>n+o0XuX1Bt+?#lDH=B2l}LOwECG!#87$tVshkE3i?
+z`x5B8ig<-6hfd}aGU>F0yOATVkSBpE)s&}&m@CiQ!(^|o+|Wb|G&CXRfA#F?i&eGr
+z;pb9sYZxX<0QkYrcaM8QjbBcrTc9_d2rQ=o;+Z5s8Ug^pALi7ZBR5AE>f#UHMBj^#
+zH<mHTw~UE1**SVb4BBIU7+6_bUujlPPA;AwxF0^J_QsR`w*ce)w=r@Gg3xjB)9UQL
+z8Rup8`O?|D9fwX2Mdn+eU3r3C+mrR#9VO*Y?EXh{L;bhZ>x;kE(YrGlgy!U?cedwS
+H&!YMpL*L33
+
+literal 0
+HcmV?d00001
+
+diff --git a/packages/opencode/test/image/fixtures/white-1x1.avif b/packages/opencode/test/image/fixtures/white-1x1.avif
+new file mode 100644
+index 0000000000000000000000000000000000000000..9d5c466444de5680b539673b26f5c770e98dacc0
+GIT binary patch
+literal 305
+zcmXv|L23d)5bQN#7Kvdo0l`D`=rNm9Zb9@WK4LQNk`6OYvkr^7CFDVV!UyCj!4GKl
+zsx?ekbyd?dL^LkrmzbJM0+c<Mxo1-@r}-4t!57hJ224Iyt~yI1VH>Yn+41{z&Ao8+
+zO_rcOu?tqaIZ=Y6m69QNfIDGcH*Yt|5KYm7t(~c#^I34AdGeE`68H-i8^DjekwOQ7
+z%TCIKx2(oZnx>#TQ|GgvF%;2*4X#>Sx5adiI^VDcEZ%4a;A8Ei_1lIV`IU)%>fXLm
+SC(Hi$r91k6J0AB$J2?Sj(>4JB
+
+literal 0
+HcmV?d00001
+
+diff --git a/packages/opencode/test/image/ingress.test.ts b/packages/opencode/test/image/ingress.test.ts
+new file mode 100644
+index 0000000..bd6c7e0
+--- /dev/null
++++ b/packages/opencode/test/image/ingress.test.ts
+@@ -0,0 +1,98 @@
++import { describe, expect, test } from "bun:test"
++import { readFileSync } from "node:fs"
++import path from "node:path"
++import { Instance } from "../../src/project/instance"
++import { Session } from "../../src/session"
++import { SessionPrompt } from "../../src/session/prompt"
++import { Server } from "../../src/server/server"
++import { ReadTool } from "../../src/tool/read"
++import { tmpdir } from "../fixture/fixture"
++
++const fixture = path.join(import.meta.dir, "fixtures", "white-1x1.avif")
++const avif = {
++  type: "file" as const,
++  mime: "image/avif",
++  filename: "white.avif",
++  url: `data:image/avif;base64,${readFileSync(fixture).toString("base64")}`,
++}
++const config = { agent: { build: { model: "openai/gpt-5.2" } } }
++
++describe("image ingress", () => {
++  test("normalizes API image parts before persisting and preserves other parts", async () => {
++    await using tmp = await tmpdir({ git: true, config })
++    await Instance.provide({
++      directory: tmp.path,
++      fn: async () => {
++        const session = await Session.create({})
++        const result = await SessionPrompt.prompt({
++          sessionID: session.id,
++          noReply: true,
++          parts: [{ type: "text", text: "before" }, avif, { type: "text", text: "after" }],
++        })
++        expect(result.parts.map((part) => part.type)).toEqual(["text", "file", "text"])
++        expect(result.parts[1]).toMatchObject({ mime: "image/png", filename: "white.avif" })
++        const stored = await Session.messages({ sessionID: session.id })
++        expect(stored).toHaveLength(1)
++        expect(stored[0].parts[1]).toMatchObject({ mime: "image/png" })
++        await Session.remove(session.id)
++      },
++    })
++  })
++
++  test("returns a specific HTTP 400 before headers and does not persist invalid images", async () => {
++    await using tmp = await tmpdir({ git: true, config })
++    await Instance.provide({
++      directory: tmp.path,
++      fn: async () => {
++        const session = await Session.create({})
++        const app = Server.App()
++        const url = `http://localhost/session/${session.id}/message?directory=${encodeURIComponent(tmp.path)}`
++        const response = await app.request(url, {
++          method: "POST",
++          headers: { "content-type": "application/json" },
++          body: JSON.stringify({ noReply: true, parts: [{ ...avif, url: "data:image/avif;base64,AAAA" }] }),
++        })
++        expect(response.status).toBe(400)
++        expect(await response.json()).toMatchObject({ name: "ImageInputError", data: { kind: "format" } })
++        expect(await Session.messages({ sessionID: session.id })).toHaveLength(0)
++        const accepted = await app.request(url, {
++          method: "POST",
++          headers: { "content-type": "application/json" },
++          body: JSON.stringify({ noReply: true, parts: [avif] }),
++        })
++        expect(accepted.status).toBe(200)
++        expect((await accepted.json()).parts[0]).toMatchObject({ mime: "image/png" })
++        expect(await Session.messages({ sessionID: session.id })).toHaveLength(1)
++        await Session.remove(session.id)
++      },
++    })
++  })
++
++  test("read tool returns converted image bytes and rejects corrupted images", async () => {
++    await using tmp = await tmpdir({
++      init: async (dir) => {
++        await Bun.write(path.join(dir, "valid.avif"), readFileSync(fixture))
++        await Bun.write(path.join(dir, "bad.avif"), "bad image")
++      },
++    })
++    await Instance.provide({
++      directory: tmp.path,
++      fn: async () => {
++        const tool = await ReadTool.init()
++        const ctx = {
++          sessionID: "test",
++          messageID: "",
++          agent: "build",
++          abort: new AbortController().signal,
++          messages: [],
++          metadata: () => {},
++          ask: async () => {},
++        }
++        const result = await tool.execute({ filePath: path.join(tmp.path, "valid.avif") }, ctx)
++        expect(result.attachments?.[0]).toMatchObject({ mime: "image/png" })
++        expect(result.attachments?.[0].url).toStartWith("data:image/png;base64,")
++        await expect(tool.execute({ filePath: path.join(tmp.path, "bad.avif") }, ctx)).rejects.toThrow("supported")
++      },
++    })
++  })
++})
+diff --git a/packages/opencode/test/offline/fetch-guard.ts b/packages/opencode/test/offline/fetch-guard.ts
+new file mode 100644
+index 0000000..6906264
+--- /dev/null
++++ b/packages/opencode/test/offline/fetch-guard.ts
+@@ -0,0 +1,235 @@
++// Exercises the actual deployment guard with two owned, temporary loopback servers.
++
++process.env.OPENCODE_OFFLINE_MODE = "true"
++const guard = await import("../../src/offline/network.ts")
++
++const checks: Record<string, unknown>[] = []
++const hits: string[] = []
++let sinkHits = 0
++const sink = Bun.serve({
++  hostname: "127.0.0.1",
++  port: 0,
++  fetch() {
++    sinkHits += 1
++    return new Response("redirect destination must not be contacted")
++  },
++})
++const source = Bun.serve({
++  hostname: "127.0.0.1",
++  port: 0,
++  fetch(request) {
++    const route = new URL(request.url).pathname
++    hits.push(route)
++    if (route === "/redirect-local") return Response.redirect(`http://127.0.0.1:${sink.port}/sink`)
++    if (route === "/redirect-external") return Response.redirect("https://example.invalid/guard-test")
++    return Response.json({ marker: "LOCAL_ONLY", method: request.method, route })
++  },
++})
++const base = `http://127.0.0.1:${source.port}`
++const report: Record<string, unknown> = {
++  status: "running",
++  runtime: { bun: Bun.version, platform: process.platform, architecture: process.arch },
++  method:
++    "Actual source module and owned random loopback HTTP servers; no model, GPU, database or existing service used.",
++  checks,
++}
++
++try {
++  const response = await fetch(base + "/api", { method: "POST", body: "synthetic" })
++  const data = await response.json()
++  checks.push({ case: "local_api_post", pass: response.ok && data.marker === "LOCAL_ONLY" && data.method === "POST" })
++  const requested = await fetch(new Request(base + "/request", { method: "POST", body: "request-object" }))
++  checks.push({ case: "local_request_object", pass: requested.ok && (await requested.json()).marker === "LOCAL_ONLY" })
++  for (const mime of ["application/octet-stream", "application/wasm"]) {
++    const embedded = await fetch(`data:${mime};base64,QUdFTlRfTE9DQUw=`)
++    checks.push({ case: "embedded_binary_data", mime, pass: embedded.ok && (await embedded.text()) === "AGENT_LOCAL" })
++  }
++  const text = await fetch("data:text/plain,synthetic")
++  checks.push({ case: "inline_text_data", pass: text.ok && (await text.text()) === "synthetic" })
++  const domainText = await fetch("data:text/plain,https%3A%2F%2Fexample.invalid%2Fnot-requested")
++  checks.push({
++    case: "domain_inside_local_data",
++    pass: domainText.ok && (await domainText.text()) === "https://example.invalid/not-requested",
++  })
++  // Public synthetic 1x1 PNG, shared with the Read tool tests; no user image data.
++  const png = Buffer.from(
++    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==",
++    "base64",
++  )
++  const image = await fetch(`data:image/png;base64,${png.toString("base64")}`)
++  checks.push({
++    case: "inline_png_data",
++    pass:
++      image.ok &&
++      image.headers.get("content-type") === "image/png" &&
++      Buffer.from(await image.arrayBuffer()).equals(png),
++  })
++  const imageRequest = await fetch(new Request(`data:image/png;base64,${png.toString("base64")}`))
++  checks.push({
++    case: "inline_png_request",
++    pass: imageRequest.ok && Buffer.from(await imageRequest.arrayBuffer()).equals(png),
++  })
++  const blob = URL.createObjectURL(new Blob([png], { type: "image/png" }))
++  try {
++    const response = await fetch(blob)
++    checks.push({
++      case: "local_png_blob",
++      pass:
++        response.ok &&
++        response.headers.get("content-type") === "image/png" &&
++        Buffer.from(await response.arrayBuffer()).equals(png),
++    })
++  } finally {
++    URL.revokeObjectURL(blob)
++  }
++  let revokedError = ""
++  try {
++    await fetch(blob)
++  } catch (error) {
++    revokedError = error instanceof Error ? error.message : String(error)
++  }
++  checks.push({
++    case: "revoked_blob_denied",
++    pass: revokedError.startsWith("Offline mode blocks this network request"),
++  })
++  const codec = await import("../../src/image/codec.ts")
++  const avif = await Bun.file(new URL("../image/fixtures/white-1x1.avif", import.meta.url)).arrayBuffer()
++  const normalized = await codec.normalize(Buffer.from(avif).toString("base64"), "image/avif", {
++    autoResize: true,
++    maxWidth: 2000,
++    maxHeight: 2000,
++    maxBase64Bytes: 5 * 1024 * 1024,
++  })
++  const converted = await fetch(`data:${normalized.mime};base64,${normalized.base64}`)
++  checks.push({
++    case: "normalized_avif_data",
++    pass:
++      converted.ok &&
++      normalized.mime === "image/png" &&
++      Buffer.from(await converted.arrayBuffer()).equals(Buffer.from(normalized.base64, "base64")),
++  })
++  const photon = await import("@silvia-odwyer/photon-node")
++  const pixels = new photon.PhotonImage(new Uint8Array([255, 255, 255, 255]), 1, 1)
++  try {
++    const jpeg = Buffer.from(pixels.get_bytes_jpeg(85))
++    const response = await fetch(`data:image/jpeg;base64,${jpeg.toString("base64")}`)
++    checks.push({
++      case: "inline_jpeg_data",
++      pass:
++        response.ok &&
++        response.headers.get("content-type") === "image/jpeg" &&
++        Buffer.from(await response.arrayBuffer()).equals(jpeg),
++    })
++  } finally {
++    pixels.free()
++  }
++  const virtual =
++    process.platform === "win32"
++      ? "file:///B:/~BUN/root/embedded/parser.wasm"
++      : "file:///$bunfs/root/embedded/parser.wasm"
++  guard.assertOfflineURL(virtual)
++  checks.push({
++    case: "bun_virtual_file_url_class",
++    pass: true,
++    scope: "Guard path classification only; compiled Bun asset loading is application acceptance.",
++  })
++  const blocked = [
++    "https://example.invalid/never-request",
++    "http://example.invalid/never-request",
++    "http://127.0.0.1.evil.invalid/never-request",
++    "http://127.0.0.1@evil.invalid/never-request",
++    "http://localhost/never-request",
++    "http://127.0.0.2/never-request",
++    "http://[::ffff:127.0.0.1]/never-request",
++    "http://192.168.1.1/never-request",
++    "blob:nodedata:unknown-local-object",
++    "blob:https://example.invalid/forged-object",
++    "file:///etc/passwd",
++    "file:///C:/Windows/System32/not-a-bundled-asset.wasm",
++    "file://example.invalid/share/parser.wasm",
++    "file:////example.invalid/share/parser.wasm",
++    "file:///B:/~BUN/root/../../outside.wasm",
++    "file:///B:/~BUN/root/%2foutside.wasm",
++    "ftp://127.0.0.1/never-request",
++  ]
++  for (const url of blocked) {
++    let message = ""
++    try {
++      await fetch(url)
++    } catch (error) {
++      message = error instanceof Error ? error.message : String(error)
++    }
++    checks.push({
++      case: "blocked_url",
++      url,
++      pass: message.startsWith("Offline mode blocks this network request"),
++      error: message,
++    })
++  }
++  let requestError = ""
++  try {
++    await fetch(new Request("https://example.invalid/request-object"))
++  } catch (error) {
++    requestError = error instanceof Error ? error.message : String(error)
++  }
++  checks.push({
++    case: "external_request_object",
++    pass: requestError.startsWith("Offline mode blocks this network request"),
++  })
++  for (const route of ["/redirect-local", "/redirect-external"]) {
++    let error = ""
++    try {
++      await fetch(base + route)
++    } catch (caught) {
++      error = caught instanceof Error ? caught.message : String(caught)
++    }
++    checks.push({ case: "automatic_redirect_blocked", route, pass: Boolean(error) && sinkHits === 0, error })
++  }
++  const manual = await fetch(base + "/redirect-external", { redirect: "manual" })
++  checks.push({
++    case: "manual_redirect_not_followed",
++    pass:
++      manual.status === 302 &&
++      manual.headers.get("Location") === "https://example.invalid/guard-test" &&
++      sinkHits === 0,
++  })
++  if (fetch.preconnect) {
++    let error = ""
++    try {
++      fetch.preconnect("https://example.invalid/")
++    } catch (caught) {
++      error = caught instanceof Error ? caught.message : String(caught)
++    }
++    checks.push({
++      case: "external_preconnect_blocked",
++      pass: error.startsWith("Offline mode blocks this network request"),
++    })
++  }
++  report.status = checks.every((check) => check.pass === true) ? "pass" : "fail"
++} catch (error) {
++  report.status = "fail"
++  report.error = error instanceof Error ? error.message : String(error)
++} finally {
++  source.stop(true)
++  sink.stop(true)
++  report.local_requests = hits
++  report.redirect_destination_requests = sinkHits
++  report.cleanup = { owned_servers_stopped: true, existing_services_or_databases_touched: false }
++  report.limits =
++    "Fetch/preconnect behavior only, not OS packet capture, raw sockets, third-party worker realms or child-process egress. External cases were rejected by the guard before native fetch/preconnect."
++  report.verified_at_utc = new Date().toISOString()
++}
++console.log(
++  JSON.stringify(
++    {
++      status: report.status,
++      checks: checks.length,
++      failed: checks.filter((c) => c.pass !== true),
++      redirect_destination_requests: sinkHits,
++      runtime: report.runtime,
++    },
++    null,
++    2,
++  ),
++)
++process.exitCode = report.status === "pass" ? 0 : 1
+diff --git a/patches/@silvia-odwyer%2Fphoton-node@0.3.4.patch b/patches/@silvia-odwyer%2Fphoton-node@0.3.4.patch
+new file mode 100644
+index 0000000..da41cb7
+--- /dev/null
++++ b/patches/@silvia-odwyer%2Fphoton-node@0.3.4.patch
+@@ -0,0 +1,285 @@
++diff --git a/photon_rs.js b/photon_rs.js
++index 8f4144d..29a964a 100644
++--- a/photon_rs.js
+++++ b/photon_rs.js
++@@ -1,6 +1,7 @@
++ 
++ let imports = {};
++-imports['__wbindgen_placeholder__'] = module.exports;
+++const __wbindgen_placeholder__ = {};
+++imports['__wbindgen_placeholder__'] = __wbindgen_placeholder__;
++ let wasm;
++ const { TextEncoder, TextDecoder } = require(`util`);
++ 
++@@ -4272,12 +4273,12 @@ class Rgba {
++ }
++ module.exports.Rgba = Rgba;
++ 
++-module.exports.__wbg_new_abda76e883ba8a5f = function() {
+++__wbindgen_placeholder__.__wbg_new_abda76e883ba8a5f = function() {
++     const ret = new Error();
++     return ret;
++ };
++ 
++-module.exports.__wbg_stack_658279fe44541cf6 = function(arg0, arg1) {
+++__wbindgen_placeholder__.__wbg_stack_658279fe44541cf6 = function(arg0, arg1) {
++     const ret = arg1.stack;
++     const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
++     const len1 = WASM_VECTOR_LEN;
++@@ -4285,7 +4286,7 @@ module.exports.__wbg_stack_658279fe44541cf6 = function(arg0, arg1) {
++     getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
++ };
++ 
++-module.exports.__wbg_error_f851667af71bcfc6 = function(arg0, arg1) {
+++__wbindgen_placeholder__.__wbg_error_f851667af71bcfc6 = function(arg0, arg1) {
++     let deferred0_0;
++     let deferred0_1;
++     try {
++@@ -4297,7 +4298,7 @@ module.exports.__wbg_error_f851667af71bcfc6 = function(arg0, arg1) {
++     }
++ };
++ 
++-module.exports.__wbg_instanceof_Window_c4b70662a0d2c5ec = function(arg0) {
+++__wbindgen_placeholder__.__wbg_instanceof_Window_c4b70662a0d2c5ec = function(arg0) {
++     let result;
++     try {
++         result = arg0 instanceof Window;
++@@ -4308,42 +4309,42 @@ module.exports.__wbg_instanceof_Window_c4b70662a0d2c5ec = function(arg0) {
++     return ret;
++ };
++ 
++-module.exports.__wbg_document_e5c1786dea6542e4 = function(arg0) {
+++__wbindgen_placeholder__.__wbg_document_e5c1786dea6542e4 = function(arg0) {
++     const ret = arg0.document;
++     return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
++ };
++ 
++-module.exports.__wbg_body_e70ae6abd01ae584 = function(arg0) {
+++__wbindgen_placeholder__.__wbg_body_e70ae6abd01ae584 = function(arg0) {
++     const ret = arg0.body;
++     return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
++ };
++ 
++-module.exports.__wbg_createElement_5d4c76f218b78145 = function() { return handleError(function (arg0, arg1, arg2) {
+++__wbindgen_placeholder__.__wbg_createElement_5d4c76f218b78145 = function() { return handleError(function (arg0, arg1, arg2) {
++     const ret = arg0.createElement(getStringFromWasm0(arg1, arg2));
++     return ret;
++ }, arguments) };
++ 
++-module.exports.__wbg_width_4c6f0048d64cf86b = function(arg0) {
+++__wbindgen_placeholder__.__wbg_width_4c6f0048d64cf86b = function(arg0) {
++     const ret = arg0.width;
++     return ret;
++ };
++ 
++-module.exports.__wbg_height_21f0d3fd8f753394 = function(arg0) {
+++__wbindgen_placeholder__.__wbg_height_21f0d3fd8f753394 = function(arg0) {
++     const ret = arg0.height;
++     return ret;
++ };
++ 
++-module.exports.__wbg_width_79e0847ed5883b03 = function(arg0) {
+++__wbindgen_placeholder__.__wbg_width_79e0847ed5883b03 = function(arg0) {
++     const ret = arg0.width;
++     return ret;
++ };
++ 
++-module.exports.__wbg_height_e4e4e4779f8feac0 = function(arg0) {
+++__wbindgen_placeholder__.__wbg_height_e4e4e4779f8feac0 = function(arg0) {
++     const ret = arg0.height;
++     return ret;
++ };
++ 
++-module.exports.__wbg_data_fda507064d127f5b = function(arg0, arg1) {
+++__wbindgen_placeholder__.__wbg_data_fda507064d127f5b = function(arg0, arg1) {
++     const ret = arg1.data;
++     const ptr1 = passArray8ToWasm0(ret, wasm.__wbindgen_malloc);
++     const len1 = WASM_VECTOR_LEN;
++@@ -4351,12 +4352,12 @@ module.exports.__wbg_data_fda507064d127f5b = function(arg0, arg1) {
++     getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
++ };
++ 
++-module.exports.__wbg_newwithu8clampedarrayandsh_1fddccb3a94a5e05 = function() { return handleError(function (arg0, arg1, arg2, arg3) {
+++__wbindgen_placeholder__.__wbg_newwithu8clampedarrayandsh_1fddccb3a94a5e05 = function() { return handleError(function (arg0, arg1, arg2, arg3) {
++     const ret = new ImageData(getClampedArrayU8FromWasm0(arg0, arg1), arg2 >>> 0, arg3 >>> 0);
++     return ret;
++ }, arguments) };
++ 
++-module.exports.__wbg_instanceof_CanvasRenderingContext2d_3abbe7ec7af32cae = function(arg0) {
+++__wbindgen_placeholder__.__wbg_instanceof_CanvasRenderingContext2d_3abbe7ec7af32cae = function(arg0) {
++     let result;
++     try {
++         result = arg0 instanceof CanvasRenderingContext2D;
++@@ -4367,24 +4368,24 @@ module.exports.__wbg_instanceof_CanvasRenderingContext2d_3abbe7ec7af32cae = fun
++     return ret;
++ };
++ 
++-module.exports.__wbg_drawImage_fede06db74e39a60 = function() { return handleError(function (arg0, arg1, arg2, arg3) {
+++__wbindgen_placeholder__.__wbg_drawImage_fede06db74e39a60 = function() { return handleError(function (arg0, arg1, arg2, arg3) {
++     arg0.drawImage(arg1, arg2, arg3);
++ }, arguments) };
++ 
++-module.exports.__wbg_drawImage_f395c8e43c79a909 = function() { return handleError(function (arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9) {
+++__wbindgen_placeholder__.__wbg_drawImage_f395c8e43c79a909 = function() { return handleError(function (arg0, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9) {
++     arg0.drawImage(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9);
++ }, arguments) };
++ 
++-module.exports.__wbg_getImageData_5e1c242046e6b59e = function() { return handleError(function (arg0, arg1, arg2, arg3, arg4) {
+++__wbindgen_placeholder__.__wbg_getImageData_5e1c242046e6b59e = function() { return handleError(function (arg0, arg1, arg2, arg3, arg4) {
++     const ret = arg0.getImageData(arg1, arg2, arg3, arg4);
++     return ret;
++ }, arguments) };
++ 
++-module.exports.__wbg_putImageData_a8b3e177ee06d521 = function() { return handleError(function (arg0, arg1, arg2, arg3) {
+++__wbindgen_placeholder__.__wbg_putImageData_a8b3e177ee06d521 = function() { return handleError(function (arg0, arg1, arg2, arg3) {
++     arg0.putImageData(arg1, arg2, arg3);
++ }, arguments) };
++ 
++-module.exports.__wbg_instanceof_HtmlCanvasElement_25d964a0dde6717e = function(arg0) {
+++__wbindgen_placeholder__.__wbg_instanceof_HtmlCanvasElement_25d964a0dde6717e = function(arg0) {
++     let result;
++     try {
++         result = arg0 instanceof HTMLCanvasElement;
++@@ -4395,93 +4396,93 @@ module.exports.__wbg_instanceof_HtmlCanvasElement_25d964a0dde6717e = function(a
++     return ret;
++ };
++ 
++-module.exports.__wbg_width_dc225e55343b745e = function(arg0) {
+++__wbindgen_placeholder__.__wbg_width_dc225e55343b745e = function(arg0) {
++     const ret = arg0.width;
++     return ret;
++ };
++ 
++-module.exports.__wbg_setwidth_488780db69b08846 = function(arg0, arg1) {
+++__wbindgen_placeholder__.__wbg_setwidth_488780db69b08846 = function(arg0, arg1) {
++     arg0.width = arg1 >>> 0;
++ };
++ 
++-module.exports.__wbg_height_3a8bec2f3fe71b26 = function(arg0) {
+++__wbindgen_placeholder__.__wbg_height_3a8bec2f3fe71b26 = function(arg0) {
++     const ret = arg0.height;
++     return ret;
++ };
++ 
++-module.exports.__wbg_setheight_1761808c18403921 = function(arg0, arg1) {
+++__wbindgen_placeholder__.__wbg_setheight_1761808c18403921 = function(arg0, arg1) {
++     arg0.height = arg1 >>> 0;
++ };
++ 
++-module.exports.__wbg_getContext_fc99dbd3a9a7e318 = function() { return handleError(function (arg0, arg1, arg2) {
+++__wbindgen_placeholder__.__wbg_getContext_fc99dbd3a9a7e318 = function() { return handleError(function (arg0, arg1, arg2) {
++     const ret = arg0.getContext(getStringFromWasm0(arg1, arg2));
++     return isLikeNone(ret) ? 0 : addToExternrefTable0(ret);
++ }, arguments) };
++ 
++-module.exports.__wbg_settextContent_f82a86a8df347e1c = function(arg0, arg1, arg2) {
+++__wbindgen_placeholder__.__wbg_settextContent_f82a86a8df347e1c = function(arg0, arg1, arg2) {
++     arg0.textContent = arg1 === 0 ? undefined : getStringFromWasm0(arg1, arg2);
++ };
++ 
++-module.exports.__wbg_appendChild_fa3b00dade9fc4cf = function() { return handleError(function (arg0, arg1) {
+++__wbindgen_placeholder__.__wbg_appendChild_fa3b00dade9fc4cf = function() { return handleError(function (arg0, arg1) {
++     const ret = arg0.appendChild(arg1);
++     return ret;
++ }, arguments) };
++ 
++-module.exports.__wbg_newnoargs_e643855c6572a4a8 = function(arg0, arg1) {
+++__wbindgen_placeholder__.__wbg_newnoargs_e643855c6572a4a8 = function(arg0, arg1) {
++     const ret = new Function(getStringFromWasm0(arg0, arg1));
++     return ret;
++ };
++ 
++-module.exports.__wbg_call_f96b398515635514 = function() { return handleError(function (arg0, arg1) {
+++__wbindgen_placeholder__.__wbg_call_f96b398515635514 = function() { return handleError(function (arg0, arg1) {
++     const ret = arg0.call(arg1);
++     return ret;
++ }, arguments) };
++ 
++-module.exports.__wbg_self_b9aad7f1c618bfaf = function() { return handleError(function () {
+++__wbindgen_placeholder__.__wbg_self_b9aad7f1c618bfaf = function() { return handleError(function () {
++     const ret = self.self;
++     return ret;
++ }, arguments) };
++ 
++-module.exports.__wbg_window_55e469842c98b086 = function() { return handleError(function () {
+++__wbindgen_placeholder__.__wbg_window_55e469842c98b086 = function() { return handleError(function () {
++     const ret = window.window;
++     return ret;
++ }, arguments) };
++ 
++-module.exports.__wbg_globalThis_d0957e302752547e = function() { return handleError(function () {
+++__wbindgen_placeholder__.__wbg_globalThis_d0957e302752547e = function() { return handleError(function () {
++     const ret = globalThis.globalThis;
++     return ret;
++ }, arguments) };
++ 
++-module.exports.__wbg_global_ae2f87312b8987fb = function() { return handleError(function () {
+++__wbindgen_placeholder__.__wbg_global_ae2f87312b8987fb = function() { return handleError(function () {
++     const ret = global.global;
++     return ret;
++ }, arguments) };
++ 
++-module.exports.__wbindgen_is_undefined = function(arg0) {
+++__wbindgen_placeholder__.__wbindgen_is_undefined = function(arg0) {
++     const ret = arg0 === undefined;
++     return ret;
++ };
++ 
++-module.exports.__wbg_buffer_fcbfb6d88b2732e9 = function(arg0) {
+++__wbindgen_placeholder__.__wbg_buffer_fcbfb6d88b2732e9 = function(arg0) {
++     const ret = arg0.buffer;
++     return ret;
++ };
++ 
++-module.exports.__wbg_new_bc5d9aad3f9ac80e = function(arg0) {
+++__wbindgen_placeholder__.__wbg_new_bc5d9aad3f9ac80e = function(arg0) {
++     const ret = new Uint8Array(arg0);
++     return ret;
++ };
++ 
++-module.exports.__wbg_set_4b3aa8445ac1e91c = function(arg0, arg1, arg2) {
+++__wbindgen_placeholder__.__wbg_set_4b3aa8445ac1e91c = function(arg0, arg1, arg2) {
++     arg0.set(arg1, arg2 >>> 0);
++ };
++ 
++-module.exports.__wbg_length_d9c4ded7e708c6a1 = function(arg0) {
+++__wbindgen_placeholder__.__wbg_length_d9c4ded7e708c6a1 = function(arg0) {
++     const ret = arg0.length;
++     return ret;
++ };
++ 
++-module.exports.__wbindgen_debug_string = function(arg0, arg1) {
+++__wbindgen_placeholder__.__wbindgen_debug_string = function(arg0, arg1) {
++     const ret = debugString(arg1);
++     const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
++     const len1 = WASM_VECTOR_LEN;
++@@ -4489,16 +4490,16 @@ module.exports.__wbindgen_debug_string = function(arg0, arg1) {
++     getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
++ };
++ 
++-module.exports.__wbindgen_throw = function(arg0, arg1) {
+++__wbindgen_placeholder__.__wbindgen_throw = function(arg0, arg1) {
++     throw new Error(getStringFromWasm0(arg0, arg1));
++ };
++ 
++-module.exports.__wbindgen_memory = function() {
+++__wbindgen_placeholder__.__wbindgen_memory = function() {
++     const ret = wasm.memory;
++     return ret;
++ };
++ 
++-module.exports.__wbindgen_init_externref_table = function() {
+++__wbindgen_placeholder__.__wbindgen_init_externref_table = function() {
++     const table = wasm.__wbindgen_export_2;
++     const offset = table.grow(4);
++     table.set(0, undefined);
++@@ -4509,7 +4510,8 @@ module.exports.__wbindgen_init_externref_table = function() {
++     ;
++ };
++ 
++-const path = require('path').join(__dirname, 'photon_rs_bg.wasm');
+++// Allow opencode's Bun compiled binary to point photon-node at its embedded wasm asset.
+++const path = globalThis.__OPENCODE_PHOTON_WASM_PATH || require('path').join(__dirname, 'photon_rs_bg.wasm');
++ const bytes = require('fs').readFileSync(path);
++ 
++ const wasmModule = new WebAssembly.Module(bytes);
+diff --git a/patches/LICENSE-Photon-Apache-2.0.txt b/patches/LICENSE-Photon-Apache-2.0.txt
+new file mode 100644
+index 0000000..1b16a2f
+--- /dev/null
++++ b/patches/LICENSE-Photon-Apache-2.0.txt
+@@ -0,0 +1,201 @@
++                                 Apache License
++                           Version 2.0, January 2004
++                        http://www.apache.org/licenses/
++
++   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
++
++   1. Definitions.
++
++      "License" shall mean the terms and conditions for use, reproduction,
++      and distribution as defined by Sections 1 through 9 of this document.
++
++      "Licensor" shall mean the copyright owner or entity authorized by
++      the copyright owner that is granting the License.
++
++      "Legal Entity" shall mean the union of the acting entity and all
++      other entities that control, are controlled by, or are under common
++      control with that entity. For the purposes of this definition,
++      "control" means (i) the power, direct or indirect, to cause the
++      direction or management of such entity, whether by contract or
++      otherwise, or (ii) ownership of fifty percent (50%) or more of the
++      outstanding shares, or (iii) beneficial ownership of such entity.
++
++      "You" (or "Your") shall mean an individual or Legal Entity
++      exercising permissions granted by this License.
++
++      "Source" form shall mean the preferred form for making modifications,
++      including but not limited to software source code, documentation
++      source, and configuration files.
++
++      "Object" form shall mean any form resulting from mechanical
++      transformation or translation of a Source form, including but
++      not limited to compiled object code, generated documentation,
++      and conversions to other media types.
++
++      "Work" shall mean the work of authorship, whether in Source or
++      Object form, made available under the License, as indicated by a
++      copyright notice that is included in or attached to the work
++      (an example is provided in the Appendix below).
++
++      "Derivative Works" shall mean any work, whether in Source or Object
++      form, that is based on (or derived from) the Work and for which the
++      editorial revisions, annotations, elaborations, or other modifications
++      represent, as a whole, an original work of authorship. For the purposes
++      of this License, Derivative Works shall not include works that remain
++      separable from, or merely link (or bind by name) to the interfaces of,
++      the Work and Derivative Works thereof.
++
++      "Contribution" shall mean any work of authorship, including
++      the original version of the Work and any modifications or additions
++      to that Work or Derivative Works thereof, that is intentionally
++      submitted to Licensor for inclusion in the Work by the copyright owner
++      or by an individual or Legal Entity authorized to submit on behalf of
++      the copyright owner. For the purposes of this definition, "submitted"
++      means any form of electronic, verbal, or written communication sent
++      to the Licensor or its representatives, including but not limited to
++      communication on electronic mailing lists, source code control systems,
++      and issue tracking systems that are managed by, or on behalf of, the
++      Licensor for the purpose of discussing and improving the Work, but
++      excluding communication that is conspicuously marked or otherwise
++      designated in writing by the copyright owner as "Not a Contribution."
++
++      "Contributor" shall mean Licensor and any individual or Legal Entity
++      on behalf of whom a Contribution has been received by Licensor and
++      subsequently incorporated within the Work.
++
++   2. Grant of Copyright License. Subject to the terms and conditions of
++      this License, each Contributor hereby grants to You a perpetual,
++      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
++      copyright license to reproduce, prepare Derivative Works of,
++      publicly display, publicly perform, sublicense, and distribute the
++      Work and such Derivative Works in Source or Object form.
++
++   3. Grant of Patent License. Subject to the terms and conditions of
++      this License, each Contributor hereby grants to You a perpetual,
++      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
++      (except as stated in this section) patent license to make, have made,
++      use, offer to sell, sell, import, and otherwise transfer the Work,
++      where such license applies only to those patent claims licensable
++      by such Contributor that are necessarily infringed by their
++      Contribution(s) alone or by combination of their Contribution(s)
++      with the Work to which such Contribution(s) was submitted. If You
++      institute patent litigation against any entity (including a
++      cross-claim or counterclaim in a lawsuit) alleging that the Work
++      or a Contribution incorporated within the Work constitutes direct
++      or contributory patent infringement, then any patent licenses
++      granted to You under this License for that Work shall terminate
++      as of the date such litigation is filed.
++
++   4. Redistribution. You may reproduce and distribute copies of the
++      Work or Derivative Works thereof in any medium, with or without
++      modifications, and in Source or Object form, provided that You
++      meet the following conditions:
++
++      (a) You must give any other recipients of the Work or
++          Derivative Works a copy of this License; and
++
++      (b) You must cause any modified files to carry prominent notices
++          stating that You changed the files; and
++
++      (c) You must retain, in the Source form of any Derivative Works
++          that You distribute, all copyright, patent, trademark, and
++          attribution notices from the Source form of the Work,
++          excluding those notices that do not pertain to any part of
++          the Derivative Works; and
++
++      (d) If the Work includes a "NOTICE" text file as part of its
++          distribution, then any Derivative Works that You distribute must
++          include a readable copy of the attribution notices contained
++          within such NOTICE file, excluding those notices that do not
++          pertain to any part of the Derivative Works, in at least one
++          of the following places: within a NOTICE text file distributed
++          as part of the Derivative Works; within the Source form or
++          documentation, if provided along with the Derivative Works; or,
++          within a display generated by the Derivative Works, if and
++          wherever such third-party notices normally appear. The contents
++          of the NOTICE file are for informational purposes only and
++          do not modify the License. You may add Your own attribution
++          notices within Derivative Works that You distribute, alongside
++          or as an addendum to the NOTICE text from the Work, provided
++          that such additional attribution notices cannot be construed
++          as modifying the License.
++
++      You may add Your own copyright statement to Your modifications and
++      may provide additional or different license terms and conditions
++      for use, reproduction, or distribution of Your modifications, or
++      for any such Derivative Works as a whole, provided Your use,
++      reproduction, and distribution of the Work otherwise complies with
++      the conditions stated in this License.
++
++   5. Submission of Contributions. Unless You explicitly state otherwise,
++      any Contribution intentionally submitted for inclusion in the Work
++      by You to the Licensor shall be under the terms and conditions of
++      this License, without any additional terms or conditions.
++      Notwithstanding the above, nothing herein shall supersede or modify
++      the terms of any separate license agreement you may have executed
++      with Licensor regarding such Contributions.
++
++   6. Trademarks. This License does not grant permission to use the trade
++      names, trademarks, service marks, or product names of the Licensor,
++      except as required for reasonable and customary use in describing the
++      origin of the Work and reproducing the content of the NOTICE file.
++
++   7. Disclaimer of Warranty. Unless required by applicable law or
++      agreed to in writing, Licensor provides the Work (and each
++      Contributor provides its Contributions) on an "AS IS" BASIS,
++      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
++      implied, including, without limitation, any warranties or conditions
++      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
++      PARTICULAR PURPOSE. You are solely responsible for determining the
++      appropriateness of using or redistributing the Work and assume any
++      risks associated with Your exercise of permissions under this License.
++
++   8. Limitation of Liability. In no event and under no legal theory,
++      whether in tort (including negligence), contract, or otherwise,
++      unless required by applicable law (such as deliberate and grossly
++      negligent acts) or agreed to in writing, shall any Contributor be
++      liable to You for damages, including any direct, indirect, special,
++      incidental, or consequential damages of any character arising as a
++      result of this License or out of the use or inability to use the
++      Work (including but not limited to damages for loss of goodwill,
++      work stoppage, computer failure or malfunction, or any and all
++      other commercial damages or losses), even if such Contributor
++      has been advised of the possibility of such damages.
++
++   9. Accepting Warranty or Additional Liability. While redistributing
++      the Work or Derivative Works thereof, You may choose to offer,
++      and charge a fee for, acceptance of support, warranty, indemnity,
++      or other liability obligations and/or rights consistent with this
++      License. However, in accepting such obligations, You may act only
++      on Your own behalf and on Your sole responsibility, not on behalf
++      of any other Contributor, and only if You agree to indemnify,
++      defend, and hold each Contributor harmless for any liability
++      incurred by, or claims asserted against, such Contributor by reason
++      of your accepting any such warranty or additional liability.
++
++   END OF TERMS AND CONDITIONS
++
++   APPENDIX: How to apply the Apache License to your work.
++
++      To apply the Apache License to your work, attach the following
++      boilerplate notice, with the fields enclosed by brackets "[]"
++      replaced with your own identifying information. (Don't include
++      the brackets!)  The text should be enclosed in the appropriate
++      comment syntax for the file format. We also recommend that a
++      file or class name and description of purpose be included on the
++      same "printed page" as the copyright notice for easier
++      identification within third-party archives.
++
++   Copyright 2023, Silvia O'Dwyer
++
++   Licensed under the Apache License, Version 2.0 (the "License");
++   you may not use this file except in compliance with the License.
++   You may obtain a copy of the License at
++
++       http://www.apache.org/licenses/LICENSE-2.0
++
++   Unless required by applicable law or agreed to in writing, software
++   distributed under the License is distributed on an "AS IS" BASIS,
++   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++   See the License for the specific language governing permissions and
++   limitations under the License.
+diff --git a/patches/NOTICE-Photon.txt b/patches/NOTICE-Photon.txt
+new file mode 100644
+index 0000000..1f6c843
+--- /dev/null
++++ b/patches/NOTICE-Photon.txt
+@@ -0,0 +1,31 @@
++Photon Node binding compatibility patch
++======================================
++
++Component: @silvia-odwyer/photon-node, version 0.3.4
++Copyright 2023, Silvia O'Dwyer
++License: Apache License, Version 2.0
++
++The complete license from the published 0.3.4 package is reproduced unchanged
++in LICENSE-Photon-Apache-2.0.txt in this directory.
++
++Package source:
++https://www.npmjs.com/package/@silvia-odwyer/photon-node/v/0.3.4
++https://registry.npmjs.org/@silvia-odwyer/photon-node/-/photon-node-0.3.4.tgz
++Upstream repository:
++https://github.com/silvia-odwyer/photon
++Published package gitHead:
++https://github.com/silvia-odwyer/photon/tree/685f5b155b36c5611c08ca678bb78ddbab3edbac
++
++The adjacent @silvia-odwyer%2Fphoton-node@0.3.4.patch modifies photon_rs.js:
++- Uses a dedicated object for WebAssembly import bindings instead of binding
++  them to the changing CommonJS export object.
++- Allows an explicit embedded WebAssembly resource path for Bun compiled
++  executables, while retaining the package-relative resource fallback.
++
++This is an application compatibility modification, not an upstream release.
++The upstream package and its recorded source revision contain no separate
++NOTICE file. This file documents the component attribution and local changes;
++it does not replace or modify the Apache-2.0 license terms.
++
++Only the source patch and notices are distributed here. No Photon WebAssembly
++binary or package archive is included in this source distribution.
